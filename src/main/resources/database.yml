@@ -1,0 +1,5 @@
+# Connection/bootstrap only. Existing SQLite quarantine data is not silently migrated.
+enabled: false
+url: 'jdbc:mariadb://localhost:3306/noxward?connectTimeout=5000&socketTimeout=10000'
+username: ''
+password: ''

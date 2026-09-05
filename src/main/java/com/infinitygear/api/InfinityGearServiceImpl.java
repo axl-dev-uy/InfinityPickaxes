@@ -85,6 +85,7 @@ public final class InfinityGearServiceImpl implements InfinityGearService {
     }
 
     private ApplicationValidation validateApplication(ItemStack gearItem, ItemStack book, String enchantmentKey) {
+        if (com.infinitygear.integration.ArchiveBookIdentity.marked(book)) return invalid(FailureReason.INVALID_BOOK, "api.archive-lifecycle-required");
         GearInstance gear = manager.inspect(gearItem, true).orElse(null);
         if (gear == null) return invalid(FailureReason.NOT_GEAR, "api.not-gear");
         if (!plugin.getDuplicateService().isUsable(gearItem)) {

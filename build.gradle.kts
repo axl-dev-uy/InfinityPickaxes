@@ -43,6 +43,7 @@ dependencies {
     testRuntimeOnly("com.willfp:libreforge:2026.33:shadow") { isTransitive = false }
     testRuntimeOnly("org.jetbrains.kotlin:kotlin-stdlib:2.3.21")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+    testRuntimeOnly("org.mariadb.jdbc:mariadb-java-client:3.5.6")
 }
 
 java {
@@ -62,6 +63,7 @@ tasks.processResources {
 
 tasks.test {
     useJUnitPlatform()
+    inputs.property("mariadbIntegrationEnabled", providers.environmentVariable("INFINITYGEAR_TEST_JDBC_URL").map { it.isNotBlank() }.orElse(false))
     jvmArgs("-javaagent:${mockitoAgent.asPath}")
 }
 
@@ -83,3 +85,10 @@ tasks.jar {
 tasks.assemble {
     dependsOn(tasks.shadowJar)
 }
+
+// Consumers compile against this artifact; only the provider loads these classes at runtime.
+val archivesApiJar = tasks.register<Jar>("archivesApiJar") {
+    archiveClassifier = "archives-api-v1"
+    from(sourceSets.main.get().output) { include("com/infinitygear/api/v1/**") }
+}
+tasks.assemble { dependsOn(archivesApiJar) }

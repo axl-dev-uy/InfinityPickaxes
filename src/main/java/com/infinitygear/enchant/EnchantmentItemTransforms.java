@@ -25,6 +25,7 @@ public final class EnchantmentItemTransforms {
     }
 
     public Removal remove(ItemStack source, Enchantment selected, boolean removable) {
+        com.infinitygear.integration.ArchiveBookIdentity.rejectLegacyMutation(source);
         if (source == null || source.getAmount() != 1 || selected == null) throw new IllegalArgumentException("One source item is required.");
         Integer level = enchantments(source).get(selected);
         if (level == null) throw new IllegalArgumentException("Selected enchantment is not present.");

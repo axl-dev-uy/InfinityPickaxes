@@ -54,6 +54,7 @@ public class InfinityPickaxes extends JavaPlugin {
     private StationManager stationManager;
     private CostRegistry costRegistry;
     private MoneyGateway moneyGateway;
+    private com.infinitygear.integration.ArchiveIntegrationBootstrap archiveIntegration;
 
     @Override
     public void onEnable() {
@@ -121,8 +122,12 @@ public class InfinityPickaxes extends JavaPlugin {
         this.gearService = new InfinityGearServiceImpl(this, gearManager, gearProfiles);
         getServer().getServicesManager().register(InfinityGearService.class, gearService, this,
                 org.bukkit.plugin.ServicePriority.Normal);
+        getServer().getServicesManager().register(com.infinitygear.api.v1.ArchiveIntegrationService.class,
+                new com.infinitygear.integration.ArchiveDiscoveryService(this), this,
+                org.bukkit.plugin.ServicePriority.Normal);
         this.guiManager = new GuiManager(this);
         this.stationManager = new StationManager(this);
+        this.archiveIntegration = new com.infinitygear.integration.ArchiveIntegrationBootstrap(this);
 
         int socketsCount = enchantManager.getAllSockets().size();
         boolean ecoPresent = enchantManager.getEcoHook().isEcoEnchantsPresent();
@@ -228,6 +233,7 @@ public class InfinityPickaxes extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (archiveIntegration != null) archiveIntegration.close();
         if (duplicateListener != null) duplicateListener.stop();
 
         // 1. Close any open CustomGui inventories

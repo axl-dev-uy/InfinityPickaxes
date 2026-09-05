@@ -72,13 +72,11 @@ public class LevelManager {
     public void addXp(InfinityPickaxe pickaxe, double xpToAdd, Player player) {
         if (pickaxe == null || xpToAdd <= 0) return;
         if (pickaxe.getLevel() >= maxLevel) {
-            pickaxe.incrementBlocksMined();
             pickaxe.saveAndSync();
             return;
         }
 
         pickaxe.addXp(xpToAdd);
-        pickaxe.incrementBlocksMined();
 
         boolean leveledUp = false;
         int oldLevel = pickaxe.getLevel();

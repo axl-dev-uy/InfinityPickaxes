@@ -7,6 +7,8 @@ description: Persistent profile-driven levelable gear with safe enchantment stat
 provides: [InfinityPickaxes]
 depend: [EcoEnchants, eco]
 softdepend: [PlaceholderAPI, WorldGuard, Vault, Nexo]
+libraries:
+  - org.mariadb.jdbc:mariadb-java-client:3.5.6
 
 commands:
   infinitygear:

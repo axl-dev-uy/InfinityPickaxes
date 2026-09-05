@@ -57,6 +57,7 @@ public final class FusionBookService {
     }
 
     private EnchantManager.ManagedBookEnchant single(ItemStack item) {
+        if (com.infinitygear.integration.ArchiveBookIdentity.marked(item)) return null;
         if (item == null || item.getType() != org.bukkit.Material.ENCHANTED_BOOK || !item.hasItemMeta()) return null;
         java.util.Set<org.bukkit.enchantments.Enchantment> all = new java.util.HashSet<>(item.getEnchantments().keySet());
         if (item.getItemMeta() instanceof org.bukkit.inventory.meta.EnchantmentStorageMeta storage) {
