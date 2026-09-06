@@ -6,7 +6,7 @@ import java.sql.*;
 import java.util.*;
 
 /** All tables belong to InfinityGear. Uses JDBC interfaces; driver is provided by Paper. */
-public final class MariaBookLedger implements BookLedger, com.infinitygear.api.v1.ProvenanceTransition {
+public final class MariaBookLedger implements BookLedger, com.infinitygear.api.v1.ProvenanceTransition, com.infinitygear.integration.BookArtifacts {
     private final DataSource dataSource;
     public MariaBookLedger(DataSource dataSource) { this.dataSource = Objects.requireNonNull(dataSource); }
 
@@ -19,6 +19,8 @@ public final class MariaBookLedger implements BookLedger, com.infinitygear.api.v
             s.executeUpdate("CREATE TABLE IF NOT EXISTS infinitygear_book_operations (operation_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY, fingerprint CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL, completed BOOLEAN NOT NULL DEFAULT FALSE) ENGINE=InnoDB");
             s.executeUpdate("CREATE TABLE IF NOT EXISTS infinitygear_book_lineage (operation_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL, parent_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL, PRIMARY KEY(operation_id,parent_id), FOREIGN KEY (parent_id) REFERENCES infinitygear_books(book_id)) ENGINE=InnoDB");
             s.executeUpdate("INSERT IGNORE INTO infinitygear_schema_migrations(version) VALUES (2)");
+            s.executeUpdate("CREATE TABLE IF NOT EXISTS infinitygear_book_artifacts (book_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY, serialized_item MEDIUMBLOB NOT NULL, FOREIGN KEY (book_id) REFERENCES infinitygear_books(book_id)) ENGINE=InnoDB");
+            s.executeUpdate("INSERT IGNORE INTO infinitygear_schema_migrations(version) VALUES (4)");
         }
     }
 
@@ -55,6 +57,42 @@ public final class MariaBookLedger implements BookLedger, com.infinitygear.api.v
         try (var c = dataSource.getConnection(); var s = c.prepareStatement("SELECT * FROM infinitygear_books WHERE book_id=?")) {
             s.setString(1, id.toString());
             try (var r = s.executeQuery()) { return r.next() ? Optional.of(read(r)) : Optional.empty(); }
+        }
+    }
+
+    @Override public Optional<byte[]> load(UUID bookId) throws SQLException {
+        try (var c = dataSource.getConnection(); var s = c.prepareStatement("SELECT b.consumed,a.serialized_item FROM infinitygear_books b LEFT JOIN infinitygear_book_artifacts a ON a.book_id=b.book_id WHERE b.book_id=?")) {
+            s.setString(1, bookId.toString());
+            try (var r = s.executeQuery()) {
+                if (!r.next() || r.getBoolean(1)) throw new IllegalArgumentException("Unknown or consumed book identity");
+                return Optional.ofNullable(r.getBytes(2));
+            }
+        }
+    }
+
+    @Override public byte[] saveFirst(Receipt receipt, byte[] candidate) throws SQLException {
+        if (candidate == null || candidate.length == 0 || candidate.length > 16_777_215)
+            throw new IllegalArgumentException("Invalid serialized item size");
+        try (var c = dataSource.getConnection()) {
+            c.setAutoCommit(false);
+            try {
+                try (var s = c.prepareStatement("SELECT * FROM infinitygear_books WHERE book_id=? FOR UPDATE")) {
+                    s.setString(1, receipt.bookId().toString());
+                    try (var r = s.executeQuery()) {
+                        if (!r.next() || !read(r).equals(receipt) || receipt.consumed())
+                            throw new IllegalArgumentException("Unknown, modified or consumed book identity");
+                    }
+                }
+                try (var s = c.prepareStatement("INSERT INTO infinitygear_book_artifacts(book_id,serialized_item) VALUES (?,?) ON DUPLICATE KEY UPDATE book_id=book_id")) {
+                    s.setString(1, receipt.bookId().toString()); s.setBytes(2, candidate); s.executeUpdate();
+                }
+                byte[] saved;
+                try (var s = c.prepareStatement("SELECT serialized_item FROM infinitygear_book_artifacts WHERE book_id=?")) {
+                    s.setString(1, receipt.bookId().toString());
+                    try (var r = s.executeQuery()) { if (!r.next()) throw new SQLException("Artifact missing"); saved = r.getBytes(1); }
+                }
+                c.commit(); return saved;
+            } catch (SQLException | RuntimeException failure) { c.rollback(); throw failure; }
         }
     }
 

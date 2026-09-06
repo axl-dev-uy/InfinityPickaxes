@@ -11,6 +11,8 @@ public final class MiningCoordinator {
         boolean reserve(MiningCredit credit);
         void complete(UUID instanceId);
         void needsRecovery(UUID instanceId);
+        /** Called only after notification returns. Durable implementations retain unacknowledged credits. */
+        void notificationDelivered(UUID creditId);
     }
     private final Journal journal;
     private final Map<UUID, MiningCredit> pending = new HashMap<>();
@@ -40,11 +42,15 @@ public final class MiningCoordinator {
             awardXp.run();
             journal.complete(credit.instanceId());
         } catch (RuntimeException failure) {
-            journal.needsRecovery(credit.instanceId());
+            try { journal.needsRecovery(credit.instanceId()); }
+            catch (RuntimeException recoveryFailure) {
+                if (recoveryFailure != failure) failure.addSuppressed(recoveryFailure);
+            }
             throw failure;
         }
         // A notification failure must never make the XP operation eligible again.
         notify.accept(credit);
+        journal.notificationDelivered(credit.creditId());
         return true;
     }
     private static boolean isAir(String data) {

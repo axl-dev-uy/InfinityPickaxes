@@ -13,38 +13,33 @@ import java.util.concurrent.*;
 public final class CanonicalIssuanceService implements BookIssuanceService {
     private final InfinityPickaxes plugin;
     private final BookLedger ledger;
-    private final Executor executor;
-    public CanonicalIssuanceService(InfinityPickaxes plugin, BookLedger ledger, Executor executor) {
-        this.plugin = plugin; this.ledger = ledger; this.executor = executor;
+    private final IntegrationTasks tasks;
+    private final IssuanceRecovery recovery;
+    public CanonicalIssuanceService(InfinityPickaxes plugin, BookLedger ledger, BookArtifacts artifacts, IntegrationTasks tasks) {
+        this.plugin = plugin; this.ledger = ledger; this.tasks = tasks;
+        this.recovery = new IssuanceRecovery(ledger, artifacts, tasks, new IssuanceRecovery.Materializer() {
+            public void validateNew(BookLedger.Issue request) {
+                var socket = plugin.getEnchantManager().getSocketByKey(request.enchantmentKey());
+                var enchant = plugin.getEnchantManager().getEnchantment(request.enchantmentKey());
+                var eco = enchant == null ? null : plugin.getEnchantManager().getEcoHook().findEcoEnchant(enchant);
+                int maximum = enchant == null ? 0 : eco == null ? enchant.getMaxLevel() : eco.getMaximumLevel();
+                if (socket == null || !socket.isEnabled() || request.level() > maximum)
+                    throw new IllegalArgumentException("Disabled or invalid native enchantment level");
+            }
+            public byte[] create(BookLedger.Receipt receipt) {
+                var enchant = plugin.getEnchantManager().getEnchantment(receipt.issue().enchantmentKey());
+                if (enchant == null) throw new IllegalStateException("Native integration unavailable for unfinished artifact; retry after recovery");
+                var item = new CanonicalBookFactory().create(enchant, receipt.issue().level());
+                ArchiveBookIdentity.stamp(item, receipt);
+                TrackedItemData.stamp(item, TrackedKind.ARCHIVE_BOOK, receipt.issue().enchantmentKey(), receipt.bookId());
+                return item.serializeAsBytes();
+            }
+        });
     }
     @Override public CompletionStage<IssuedBook> issue(BookLedger.Issue request) {
         if (!Bukkit.isPrimaryThread()) throw new IllegalStateException("Server thread required");
         var authority = plugin.getServer().getServicesManager().load(ProvenanceAuthority.class);
-        if (authority == null) return CompletableFuture.failedFuture(new IllegalStateException("Provenance authority unavailable"));
-        var socket = plugin.getEnchantManager().getSocketByKey(request.enchantmentKey());
-        var enchant = plugin.getEnchantManager().getEnchantment(request.enchantmentKey());
-        var eco = enchant == null ? null : plugin.getEnchantManager().getEcoHook().findEcoEnchant(enchant);
-        int maximum = enchant == null ? 0 : eco == null ? enchant.getMaxLevel() : eco.getMaximumLevel();
-        if (enchant == null) return CompletableFuture.failedFuture(new IllegalStateException("Native enchantment unavailable; persisted issuance can be retried after integration recovery"));
-        boolean eligible = socket != null && socket.isEnabled() && request.level() <= maximum;
-        ItemStack template = new CanonicalBookFactory().create(enchant, request.level());
-        return CompletableFuture.supplyAsync(() -> {
-            try {
-                var existing = ledger.find(request.operationId(), request.rewardId());
-                if (existing.isPresent()) {
-                    if (!existing.get().issue().equals(request)) throw new IllegalArgumentException("Operation/reward payload mismatch");
-                    return existing.get();
-                }
-                if (!eligible) throw new IllegalArgumentException("Disabled or invalid native enchantment level");
-                if (!authority.validate(request)) throw new IllegalArgumentException("Provenance rejected");
-                return ledger.issue(request);
-            } catch (Exception failure) { throw new CompletionException(failure); }
-        }, executor).thenCompose(receipt -> onServer(() -> {
-            if (receipt.consumed()) throw new IllegalStateException("Issued source already consumed");
-            ArchiveBookIdentity.stamp(template, receipt);
-            TrackedItemData.stamp(template, TrackedKind.ARCHIVE_BOOK, request.enchantmentKey(), receipt.bookId());
-            return new IssuedBook(receipt, template.serializeAsBytes());
-        }));
+        return recovery.issue(request, authority);
     }
     @Override public CompletionStage<Boolean> validate(ItemStack item) {
         if (!Bukkit.isPrimaryThread()) throw new IllegalStateException("Server thread required");
@@ -53,20 +48,8 @@ public final class CanonicalIssuanceService implements BookIssuanceService {
         final UUID id;
         try { id = UUID.fromString(snapshot.getItemMeta().getPersistentDataContainer().get(ArchiveBookIdentity.ID, PersistentDataType.STRING)); }
         catch (RuntimeException invalid) { return CompletableFuture.completedFuture(false); }
-        return CompletableFuture.supplyAsync(() -> {
-            try { return ledger.find(id); }
-            catch (Exception failure) { throw new CompletionException(failure); }
-        }, executor).thenCompose(receipt -> onServer(() -> receipt.isPresent()
+        return tasks.database(() -> ledger.find(id)).thenCompose(receipt -> tasks.server(() -> receipt.isPresent()
                 && ArchiveBookIdentity.matches(snapshot, receipt.get())
                 && plugin.getDuplicateService().isUsable(snapshot)));
-    }
-    private <T> CompletionStage<T> onServer(Callable<T> task) {
-        var result = new CompletableFuture<T>();
-        try {
-            plugin.getServer().getScheduler().runTask(plugin, () -> {
-                try { result.complete(task.call()); } catch (Exception failure) { result.completeExceptionally(failure); }
-            });
-        } catch (RuntimeException disabled) { result.completeExceptionally(disabled); }
-        return result;
     }
 }

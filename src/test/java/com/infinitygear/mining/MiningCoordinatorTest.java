@@ -9,11 +9,36 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.*;
 
 class MiningCoordinatorTest {
+    @Test void acknowledgementFailureDoesNotReapplyXpOrRequestXpRecovery() {
+        var journal = new Journal() {
+            @Override public void notificationDelivered(UUID id) { throw new IllegalStateException("Ack unavailable"); }
+            @Override public void needsRecovery(UUID id) { fail("Notification failure is not an XP failure"); }
+        };
+        var service = new MiningCoordinator(journal); var xp = new AtomicInteger();
+        var credit = credit(UUID.randomUUID(), MiningCredit.Source.NORMAL, false, true, "minecraft:stone", "1");
+        assertThrows(IllegalStateException.class, () -> service.credit(credit, xp::incrementAndGet, c -> {}));
+        assertEquals("COMPLETED", journal.states.get(credit.instanceId()));
+        assertFalse(service.credit(credit, xp::incrementAndGet, c -> fail()));
+        assertEquals(1, xp.get());
+    }
+    @Test void journalRecoveryFailurePreservesOriginalXpFailure() {
+        var recoveryFailure = new IllegalStateException("Journal offline");
+        var journal = new Journal() {
+            @Override public void needsRecovery(UUID id) { throw recoveryFailure; }
+        };
+        var xpFailure = new IllegalStateException("XP uncertain");
+        var service = new MiningCoordinator(journal);
+        var credit = credit(UUID.randomUUID(), MiningCredit.Source.NORMAL, false, true, "minecraft:stone", "1");
+        var thrown = assertThrows(IllegalStateException.class, () -> service.credit(credit, () -> { throw xpFailure; }, c -> fail()));
+        assertSame(xpFailure, thrown); assertArrayEquals(new Throwable[]{recoveryFailure}, thrown.getSuppressed());
+        assertFalse(service.credit(credit, () -> fail(), c -> fail()));
+    }
     static class Journal implements MiningCoordinator.Journal {
         final Map<UUID, String> states = new HashMap<>();
         public boolean reserve(MiningCredit c) { return states.putIfAbsent(c.instanceId(), "RESERVED") == null; }
         public void complete(UUID id) { states.put(id, "COMPLETED"); }
         public void needsRecovery(UUID id) { states.put(id, "RECOVERY"); }
+        public void notificationDelivered(UUID id) { }
     }
     static MiningCredit credit(UUID instance, MiningCredit.Source source, boolean placed, boolean success, String block, String generation) {
         return new MiningCredit(UUID.randomUUID(), instance, UUID.randomUUID(), UUID.randomUUID(), "infinitygear:pickaxe",

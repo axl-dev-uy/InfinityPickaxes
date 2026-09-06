@@ -62,4 +62,26 @@ class MariaBookLedgerIntegrationTest {
         for (UUID id : ids) assertTrue(ledger.find(id).orElseThrow().consumed());
         assertThrows(IllegalArgumentException.class, () -> new ProvenanceTransition.Request(UUID.randomUUID(), op.operation(), List.of(ids.getFirst(), ids.getFirst()), op.outputs()));
     }
+    @Test void artifactBytesAreImmutableAcrossConcurrentWritersAndRestart() throws Exception {
+        var receipt = ledger.issue(request(UUID.randomUUID(), UUID.randomUUID(), "0.1"));
+        assertTrue(ledger.load(receipt.bookId()).isEmpty());
+        byte[] winner;
+        try (var executor = Executors.newFixedThreadPool(4)) {
+            var jobs = new ArrayList<Future<byte[]>>();
+            for (int i = 0; i < 8; i++) {
+                byte[] candidate = {(byte) i};
+                jobs.add(executor.submit(() -> ledger.saveFirst(receipt, candidate)));
+            }
+            winner = jobs.getFirst().get();
+            for (var job : jobs) assertArrayEquals(winner, job.get());
+        }
+        database();
+        assertArrayEquals(winner, ledger.load(receipt.bookId()).orElseThrow());
+        assertArrayEquals(winner, ledger.saveFirst(receipt, new byte[]{99}));
+        var operation = new ProvenanceTransition.Request(UUID.randomUUID(), ProvenancePolicy.Operation.REMOVE,
+                List.of(receipt.bookId()), List.of());
+        ledger.transition(operation, (o,s,n) -> new ProvenancePolicy.Decision(true, List.of(), "test retirement policy"));
+        assertThrows(IllegalArgumentException.class, () -> ledger.load(receipt.bookId()));
+        assertThrows(IllegalArgumentException.class, () -> ledger.saveFirst(receipt, new byte[]{99}));
+    }
 }

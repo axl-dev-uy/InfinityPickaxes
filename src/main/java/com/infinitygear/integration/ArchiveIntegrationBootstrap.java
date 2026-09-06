@@ -9,9 +9,11 @@ import java.io.File;
 import java.util.concurrent.*;
 
 public final class ArchiveIntegrationBootstrap implements AutoCloseable {
-    private final ExecutorService executor = Executors.newSingleThreadExecutor(Thread.ofPlatform().name("InfinityGear-journal").factory());
+    private final IntegrationTasks tasks;
     private volatile boolean closed;
     public ArchiveIntegrationBootstrap(InfinityPickaxes plugin) {
+        tasks = new IntegrationTasks(Executors.newSingleThreadExecutor(Thread.ofPlatform().name("InfinityGear-journal").factory()),
+                task -> plugin.getServer().getScheduler().runTask(plugin, task));
         File file = new File(plugin.getDataFolder(), "database.yml");
         if (!file.exists()) plugin.saveResource("database.yml", false);
         var config = YamlConfiguration.loadConfiguration(file);
@@ -24,19 +26,16 @@ public final class ArchiveIntegrationBootstrap implements AutoCloseable {
             plugin.getLogger().severe("Archive issuance unavailable: invalid MariaDB bootstrap configuration");
             return;
         }
-        executor.submit(() -> {
-            try {
-                ledger.migrate();
-                if (closed) return;
-                plugin.getServer().getScheduler().runTask(plugin, () -> {
+        tasks.database(() -> { ledger.migrate(); return null; }).thenCompose(ignored -> tasks.server(() -> {
                     if (!closed) plugin.getServer().getServicesManager().register(BookIssuanceService.class,
-                            new CanonicalIssuanceService(plugin, ledger, executor), plugin, ServicePriority.Normal);
-                });
-            } catch (Exception unavailable) {
+                            new CanonicalIssuanceService(plugin, ledger, ledger, tasks), plugin, ServicePriority.Normal);
+                    return null;
+                })).whenComplete((ignored, unavailable) -> {
+            if (unavailable != null && !closed) {
                 // JDBC exception text may contain connection credentials. Do not log it.
                 plugin.getLogger().severe("Archive issuance unavailable: MariaDB initialization failed (" + unavailable.getClass().getSimpleName() + ")");
             }
         });
     }
-    @Override public void close() { closed = true; executor.shutdownNow(); }
+    @Override public void close() { closed = true; tasks.close(); }
 }

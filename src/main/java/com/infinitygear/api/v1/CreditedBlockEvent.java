@@ -4,7 +4,9 @@ import org.bukkit.event.Event;
 import org.bukkit.event.HandlerList;
 import java.util.Objects;
 
-/** Post-credit observation only. Never cancellable. Emitted on the server thread. */
+/** Post-credit observation only. Never cancellable. Emitted on the server thread.
+ * Recovery may replay the same creditId; consumers must durably deduplicate it before granting rewards.
+ * Event dispatch alone does not prove a consumer persisted the credit. */
 public final class CreditedBlockEvent extends Event {
     private static final HandlerList HANDLERS = new HandlerList();
     private final MiningCredit credit;

@@ -59,6 +59,8 @@ public final class ArchiveDiscoveryService implements ArchiveIntegrationService 
 
     @Override public Map<String, Capability> capabilities() {
         return Map.of("discovery", new Capability(true, "Poll snapshot revision on the server thread"),
+                "book-recovery", new Capability(plugin.getServer().getServicesManager().load(com.infinitygear.api.v1.BookIssuanceService.class) != null,
+                        "Saved item recovery requires MariaDB; new issuance also requires provenance authority"),
                 "book-issuance", new Capability(plugin.getServer().getServicesManager().load(com.infinitygear.api.v1.BookIssuanceService.class) != null
                         && plugin.getServer().getServicesManager().load(com.infinitygear.api.v1.BookIssuanceService.ProvenanceAuthority.class) != null,
                         "Requires configured MariaDB journal and issuance authority"),
