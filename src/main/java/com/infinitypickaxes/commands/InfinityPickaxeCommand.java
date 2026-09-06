@@ -219,6 +219,10 @@ public class InfinityPickaxeCommand implements CommandExecutor, TabCompleter {
                     plugin.getMessageManager().sendMessage(sender, "messages.player-not-found");
                     return true;
                 }
+                if (com.infinitygear.mining.MiningXpItemProjection.isManaged(target.getInventory().getItemInMainHand())) {
+                    sender.sendMessage("§cThis item's XP and level are managed by the mining ledger; legacy progression commands are unavailable.");
+                    return true;
+                }
                 if (gearCommand) {
                     try {
                         int targetLevel = Integer.parseInt(args[2]);
@@ -261,6 +265,10 @@ public class InfinityPickaxeCommand implements CommandExecutor, TabCompleter {
                 Player target = Bukkit.getPlayer(args[1]);
                 if (target == null) {
                     plugin.getMessageManager().sendMessage(sender, "messages.player-not-found");
+                    return true;
+                }
+                if (com.infinitygear.mining.MiningXpItemProjection.isManaged(target.getInventory().getItemInMainHand())) {
+                    sender.sendMessage("§cThis item's XP and level are managed by the mining ledger; legacy progression commands are unavailable.");
                     return true;
                 }
                 if (gearCommand) {

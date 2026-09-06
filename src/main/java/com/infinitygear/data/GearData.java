@@ -82,6 +82,7 @@ public final class GearData {
     }
 
     public static void save(GearInstance gear, boolean quarantined, boolean mirrorLegacyPickaxe) {
+        com.infinitygear.mining.MiningXpItemProjection.requireUnchangedProgress(gear.item(), gear.level(), gear.xp(), gear.blocksMined());
         ItemMeta meta = gear.item().getItemMeta();
         if (meta == null) throw new IllegalArgumentException("Gear item has no metadata.");
         PersistentDataContainer pdc = meta.getPersistentDataContainer();

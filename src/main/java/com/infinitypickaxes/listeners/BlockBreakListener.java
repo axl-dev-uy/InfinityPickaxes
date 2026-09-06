@@ -39,6 +39,8 @@ public class BlockBreakListener implements Listener {
         Player player = event.getPlayer();
         if (!player.hasPermission("infinitypickaxes.use")) return;
         ItemStack held = player.getInventory().getItemInMainHand();
+        // An opted-in DB account must never receive a second award through legacy event acceptance.
+        if (com.infinitygear.mining.MiningXpItemProjection.isManaged(held)) return;
 
         InfinityPickaxe pickaxe = plugin.getPickaxeManager().getOrCreatePickaxe(held, player);
         if (pickaxe == null) return;

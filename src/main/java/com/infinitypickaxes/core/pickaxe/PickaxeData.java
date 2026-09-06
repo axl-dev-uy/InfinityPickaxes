@@ -104,6 +104,7 @@ public final class PickaxeData {
      */
     public static void saveToItemStack(InfinityPickaxe pickaxe, ItemStack item) {
         if (item == null || pickaxe == null) return;
+        com.infinitygear.mining.MiningXpItemProjection.requireUnchangedProgress(item, pickaxe.getLevel(), pickaxe.getXp(), pickaxe.getBlocksMined());
 
         ItemMeta meta = item.getItemMeta();
         if (meta == null) return;
