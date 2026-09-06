@@ -17,11 +17,6 @@ public final class MariaMiningXpLedger {
 
     public void migrate() throws SQLException {
         new MariaMiningJournal(source).migrate();
-        try (var c = source.getConnection(); var s = c.createStatement()) {
-            s.executeUpdate("CREATE TABLE IF NOT EXISTS infinitygear_xp_accounts (pickaxe_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY, profile_id VARCHAR(256) NOT NULL, revision BIGINT NOT NULL, level_value INT NOT NULL, xp DOUBLE NOT NULL, blocks_mined BIGINT NOT NULL) ENGINE=InnoDB");
-            s.executeUpdate("CREATE TABLE IF NOT EXISTS infinitygear_mining_xp_receipts (credit_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY, pickaxe_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL, revision BIGINT NOT NULL, plan MEDIUMBLOB NOT NULL, UNIQUE (pickaxe_id, revision), FOREIGN KEY (credit_id) REFERENCES infinitygear_mining_credits(credit_id), FOREIGN KEY (pickaxe_id) REFERENCES infinitygear_xp_accounts(pickaxe_id)) ENGINE=InnoDB");
-            s.executeUpdate("INSERT IGNORE INTO infinitygear_schema_migrations(version) VALUES (6)");
-        }
     }
     /** Explicit adoption only after custody and legacy-writer exclusion are established by caller.
      * Existing accounts return authoritative progress; this method never resets their XP. */
@@ -56,12 +51,22 @@ public final class MariaMiningXpLedger {
     /** XP, receipt and completed mining credit share one commit; a retry cannot add XP twice.
      * Existing legacy reservations have no XP evidence and are rejected, never adopted as unpaid. */
     public Receipt apply(MiningCredit credit, MiningXpPlan plan) throws SQLException {
+        return apply(credit, plan, evidence(credit));
+    }
+    public Receipt apply(MiningCredit credit, MiningXpPlan plan,
+                         com.infinitygear.api.v1.MiningIncidentService.Evidence evidence) throws SQLException {
         Objects.requireNonNull(credit); Objects.requireNonNull(plan);
+        if (!evidence.operationId().equals(credit.creditId()) || !evidence.playerId().equals(credit.playerId())
+                || !Objects.equals(evidence.itemId(), credit.pickaxeId()) || !evidence.worldId().equals(credit.worldId())
+                || evidence.x() != credit.x() || evidence.y() != credit.y() || evidence.z() != credit.z()
+                || !evidence.originalData().equals(credit.originalBlockData())) throw new IllegalArgumentException("Evidence attribution mismatch");
         if (!credit.legitimate() || !credit.successful() || !credit.pickaxeId().equals(plan.pickaxeId())
                 || !credit.profileId().equals(plan.profileId()) || Set.of("minecraft:air", "minecraft:cave_air", "minecraft:void_air")
                 .contains(credit.originalBlockData().split("\\[", 2)[0])) throw new IllegalArgumentException("Ineligible mining XP credit");
         Progress after = plan.after(); long nextRevision = Math.addExact(plan.expectedRevision(), 1);
         try (var c = source.getConnection()) {
+            // See the separately committed submission marker; account FOR UPDATE still serializes XP.
+            c.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
             c.setAutoCommit(false);
             try {
                 var current = account(c, plan.pickaxeId(), true).orElseThrow(() -> new IllegalStateException("XP account has not been adopted"));
@@ -73,6 +78,11 @@ public final class MariaMiningXpLedger {
                 }
                 if (current.revision() != plan.expectedRevision() || !current.progress().equals(plan.before())
                         || !current.profileId().equals(plan.profileId())) throw new IllegalStateException("Stale XP account revision or progress");
+                // A separate autocommit persists the one-shot marker while this transaction holds
+                // the account lock. Concurrent identical calls wait for this transaction's outcome.
+                // A crash/rollback after this marker NEVER permits a new award on a subsequent call.
+                if (!new MariaMiningJournal(source).recordAttempt(evidence, credit.instanceId(), MariaMiningJournal.AttemptState.CONFIRMED))
+                    throw new IllegalStateException("Mining operation already submitted without a committed receipt; voided, no replay");
                 try (var s = c.prepareStatement("INSERT INTO infinitygear_mining_credits(instance_id,credit_id,player_id,pickaxe_id,profile_id,world_id,block_x,block_y,block_z,original_data,source_type,generation_ref,state) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'COMPLETED')")) {
                     s.setString(1, credit.instanceId().toString()); s.setString(2, credit.creditId().toString());
                     s.setString(3, credit.playerId().toString()); s.setString(4, credit.pickaxeId().toString());
@@ -90,12 +100,49 @@ public final class MariaMiningXpLedger {
                     s.setLong(4, after.blocksMined()); s.setString(5, plan.pickaxeId().toString());
                     if (s.executeUpdate() != 1) throw new IllegalStateException("XP account disappeared");
                 }
+                if (!MariaMiningJournal.finishAttempt(c, credit.creditId(), MariaMiningJournal.AttemptState.COMMITTED, "XP_RECEIPT_COMMITTED"))
+                    throw new IllegalStateException("Attempt was voided before commit");
                 c.commit(); return new Receipt(credit, plan, new Account(plan.pickaxeId(), plan.profileId(), nextRevision, after));
             } catch (SQLException | RuntimeException failure) {
                 try { c.rollback(); } catch (SQLException rollback) { failure.addSuppressed(rollback); }
                 throw failure;
             }
+        } catch (SQLException | RuntimeException failure) {
+            // Forensics only, after releasing the transaction/connection. A response loss may
+            // already have committed; never overwrite its receipt and never submit XP again.
+            try { recoverOperation(credit, plan); }
+            catch (SQLException | RuntimeException auditFailure) { failure.addSuppressed(auditFailure); }
+            throw failure;
         }
+    }
+    /** Receipt-only recovery. The account lock waits for any in-flight XP transaction to finish;
+     * a missing receipt is a voided operation, never an instruction to call apply again. */
+    public Optional<Receipt> recoverOperation(MiningCredit credit, MiningXpPlan plan) throws SQLException {
+        if (!credit.pickaxeId().equals(plan.pickaxeId()) || !credit.profileId().equals(plan.profileId()))
+            throw new IllegalArgumentException("Recovery account mismatch");
+        try (var c = source.getConnection()) {
+            c.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
+            c.setAutoCommit(false);
+            try {
+                account(c, plan.pickaxeId(), true);
+                var saved = receipt(c, credit.creditId());
+                if (saved.isPresent() && (!saved.get().credit().equals(credit) || !saved.get().plan().equals(plan)))
+                    throw new IllegalArgumentException("Mining recovery payload mismatch");
+                MariaMiningJournal.finishAttempt(c, credit.creditId(), saved.isPresent()
+                        ? MariaMiningJournal.AttemptState.COMMITTED : MariaMiningJournal.AttemptState.COMMIT_FAILED,
+                        saved.isPresent() ? "XP_RECEIPT_COMMITTED" : "NO_COMMITTED_RECEIPT_NO_REPLAY");
+                c.commit(); return saved;
+            } catch (SQLException | RuntimeException failure) { c.rollback(); throw failure; }
+        }
+    }
+    /** Legacy internal callers have incomplete forensic context. Live adapters must pass captured evidence. */
+    private static com.infinitygear.api.v1.MiningIncidentService.Evidence evidence(MiningCredit credit) {
+        UUID generation;
+        try { generation = UUID.fromString(credit.generation()); } catch (IllegalArgumentException unknown) { generation = null; }
+        return new com.infinitygear.api.v1.MiningIncidentService.Evidence(credit.creditId(), credit.playerId(), credit.pickaxeId(),
+                "unavailable", generation, credit.worldId(), credit.x(), credit.y(), credit.z(), credit.originalBlockData(),
+                credit.legitimate() ? "PROVIDER_LEGITIMATE" : "UNKNOWN", "trusted internal completion; generation=" + credit.generation(),
+                "XP_SUBMISSION", "CONFIRMED_SUBMISSION", java.time.Instant.now(), Map.of("context", "internal-unavailable"), "unavailable");
     }
     private Optional<Account> account(Connection c, UUID id, boolean lock) throws SQLException {
         try (var s = c.prepareStatement("SELECT * FROM infinitygear_xp_accounts WHERE pickaxe_id=?" + (lock ? " FOR UPDATE" : ""))) {

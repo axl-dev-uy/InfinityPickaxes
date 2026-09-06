@@ -10,6 +10,15 @@ import java.time.Duration;
 import static org.junit.jupiter.api.Assertions.*;
 
 class MiningNotificationDispatcherTest {
+    @Test void unconfirmedOutboxInputNeverReachesReceiverOrAcknowledgement() {
+        try (var f = new Fixture()) {
+            var c = credit(); var unconfirmed = new MiningCredit(c.creditId(), c.instanceId(), c.playerId(), c.pickaxeId(), c.profileId(),
+                    c.worldId(), c.x(), c.y(), c.z(), c.originalBlockData(), c.source(), c.generation(), true, false);
+            f.pending.add(unconfirmed); f.receiver(value -> { fail("No downstream rewards for unconfirmed input"); return CompletableFuture.completedFuture(true); });
+            var result = f.dispatcher.drain(); f.flush();
+            assertEquals(List.of(c.creditId()), result.join().failed()); assertTrue(f.acknowledgements.isEmpty());
+        }
+    }
     @Test void realExecutorsKeepJournalWorkOffTheServerThread() throws Exception {
         var credit = credit(); var acknowledgements = new AtomicInteger();
         var outbox = new MiningNotificationDispatcher.Outbox() {

@@ -8,6 +8,8 @@ import java.util.function.Consumer;
  * Journal claims must be durable in production; ambiguous XP failures are never automatically retried. */
 public final class MiningCoordinator {
     public interface Journal {
+        /** Durable production journals require the atomic XP participant, not an arbitrary callback. */
+        default boolean permitsCallbackAwards() { return true; }
         boolean reserve(MiningCredit credit);
         void complete(UUID instanceId);
         void needsRecovery(UUID instanceId);
@@ -37,6 +39,7 @@ public final class MiningCoordinator {
     }
     public boolean credit(MiningCredit credit, Runnable awardXp, Consumer<MiningCredit> notify) {
         if (!credit.legitimate() || !credit.successful() || isAir(credit.originalBlockData())) return false;
+        if (!journal.permitsCallbackAwards()) throw new IllegalStateException("Durable mining requires the confirmed-only XP receipt participant");
         if (!journal.reserve(credit)) return false;
         try {
             awardXp.run();

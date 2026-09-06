@@ -19,14 +19,21 @@ public final class ArchiveIntegrationBootstrap implements AutoCloseable {
         var config = YamlConfiguration.loadConfiguration(file);
         if (!config.getBoolean("enabled")) return;
         final MariaBookLedger ledger;
+        final MariaMiningJournal miningJournal;
         try {
-            ledger = new MariaBookLedger(new DriverDataSource(config.getString("url"),
-                    config.getString("username", ""), config.getString("password", "")));
+            var source = new DriverDataSource(config.getString("url"), config.getString("username", ""), config.getString("password", ""));
+            ledger = new MariaBookLedger(source);
+            miningJournal = new MariaMiningJournal(source);
         } catch (IllegalArgumentException invalid) {
             plugin.getLogger().severe("Archive issuance unavailable: invalid MariaDB bootstrap configuration");
             return;
         }
-        tasks.database(() -> { ledger.migrate(); return null; }).thenCompose(ignored -> tasks.server(() -> {
+        tasks.database(() -> { ledger.migrate(); miningJournal.migrate(); return null; }).thenCompose(ignored -> tasks.server(() -> {
+                    if (!closed) plugin.getServer().getServicesManager().register(com.infinitygear.api.v1.MiningIncidentService.class,
+                            new com.infinitygear.mining.MiningIncidentRecorder(tasks, miningJournal,
+                                    new com.infinitygear.mining.MiningIncidentAlerts(
+                                            () -> com.infinitygear.mining.MiningIncidentAlerts.Settings.read(plugin.getConfigManager().getConfig()),
+                                            () -> plugin.getServer().getOnlinePlayers(), System::currentTimeMillis)), plugin, ServicePriority.Normal);
                     if (!closed) plugin.getServer().getServicesManager().register(BookIssuanceService.class,
                             new CanonicalIssuanceService(plugin, ledger, ledger, tasks), plugin, ServicePriority.Normal);
                     return null;

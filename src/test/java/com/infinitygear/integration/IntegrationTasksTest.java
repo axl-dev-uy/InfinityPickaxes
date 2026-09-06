@@ -7,6 +7,17 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.*;
 
 class IntegrationTasksTest {
+    @Test void misconfiguredExecutorCannotRunDatabaseOnServerThread() {
+        var executor = org.mockito.Mockito.mock(ExecutorService.class);
+        org.mockito.Mockito.doAnswer(call -> { call.<Runnable>getArgument(0).run(); return null; }).when(executor).execute(org.mockito.ArgumentMatchers.any());
+        try (var bukkit = org.mockito.Mockito.mockStatic(org.bukkit.Bukkit.class); var tasks = new IntegrationTasks(executor, Runnable::run)) {
+            bukkit.when(org.bukkit.Bukkit::getServer).thenReturn(org.mockito.Mockito.mock(org.bukkit.Server.class));
+            bukkit.when(org.bukkit.Bukkit::isPrimaryThread).thenReturn(true);
+            var touched = new AtomicInteger();
+            assertThrows(CompletionException.class, () -> tasks.database(touched::incrementAndGet).join());
+            assertEquals(0, touched.get());
+        }
+    }
     @Test void cancelledBukkitCallbacksCompleteExceptionallyOnClose() {
         var callbacks = new ArrayList<Runnable>(); var count = new AtomicInteger();
         var tasks = new IntegrationTasks(Executors.newSingleThreadExecutor(), callbacks::add);

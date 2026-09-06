@@ -23,6 +23,7 @@ commands:
     usage: /<command> [give|reload|setlevel|addxp|gui|duplicate]
 
 permissions:
+  noxwardarchives.alerts.mining: {default: op}
   infinitygear.use: {default: true}
   infinitygear.admin:
     default: op

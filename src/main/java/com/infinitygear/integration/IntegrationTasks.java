@@ -14,13 +14,18 @@ public final class IntegrationTasks implements AutoCloseable {
     public IntegrationTasks(ExecutorService worker, Consumer<Runnable> server) {
         this.worker = Objects.requireNonNull(worker); this.server = Objects.requireNonNull(server);
     }
-    public <T> CompletableFuture<T> database(Callable<T> work) { return submit(work, worker::execute); }
+    public <T> CompletableFuture<T> database(Callable<T> work) {
+        return submit(() -> {
+            if (org.bukkit.Bukkit.getServer() != null && org.bukkit.Bukkit.isPrimaryThread()) throw new IllegalStateException("MariaDB work is forbidden on the server thread");
+            return work.call();
+        }, worker::execute);
+    }
     public <T> CompletableFuture<T> server(Callable<T> work) { return submit(work, server); }
 
     private <T> CompletableFuture<T> submit(Callable<T> work, Consumer<Runnable> dispatch) {
         var future = new CompletableFuture<T>();
         synchronized (this) {
-            if (closed) return CompletableFuture.failedFuture(new IllegalStateException("InfinityGear integration stopped; retry the operation after restart"));
+            if (closed) return CompletableFuture.failedFuture(new IllegalStateException("InfinityGear integration stopped; inspect committed receipts, never replay uncertain mining"));
             pending.add(future);
         }
         future.whenComplete((value, failure) -> { synchronized (this) { pending.remove(future); } });

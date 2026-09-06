@@ -66,6 +66,10 @@ public final class MiningNotificationDispatcher implements AutoCloseable {
     }
 
     private CompletableFuture<Batch> deliver(MiningCredit credit, Batch batch) {
+        if (!credit.successful() || !credit.legitimate()) {
+            var failed = new ArrayList<>(batch.failed()); failed.add(credit.creditId());
+            return CompletableFuture.completedFuture(new Batch(batch.acknowledged(), batch.deferred(), failed));
+        }
         return tasks.server(() -> {
             ensureOpen();
             return Objects.requireNonNull(receiver.accept(credit), "Receiver must return an acceptance stage");

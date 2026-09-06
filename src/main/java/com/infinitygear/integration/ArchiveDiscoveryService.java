@@ -65,6 +65,11 @@ public final class ArchiveDiscoveryService implements ArchiveIntegrationService 
                         && plugin.getServer().getServicesManager().load(com.infinitygear.api.v1.BookIssuanceService.ProvenanceAuthority.class) != null,
                         "Requires configured MariaDB journal and issuance authority"),
                 "book-lifecycle", new Capability(false, "Requires product policy and inventory participant recovery"),
-                "strict-mining", new Capability(false, "Requires authoritative generation and successful-break provider"));
+                "strict-mining", new Capability(false, "Confirmed-only/fail-closed: AxMines guarded diagnostics lack validated mutation/protection authority; XP adoption/custody and durable receiver are not wired"),
+                "mining-setblock", new Capability(false, "Direct setblock has no authoritative producer completion hook"),
+                "mining-breakNaturally", new Capability(false, "breakNaturally has no authoritative producer completion hook"),
+                "mining-normal", new Capability(false, "AxMines replacement/original listener timing and protection transparency require live acceptance"),
+                "mining-aoe", new Capability(false, "Nested accounting, reset timing and actual Blast/Dynamite/Vein behavior require live acceptance"),
+                "mining-world-edits", new Capability(false, "Unobservable external edits and placement/movement attribution have no authoritative completion evidence"));
     }
 }

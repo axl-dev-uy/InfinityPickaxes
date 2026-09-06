@@ -81,7 +81,10 @@ class MariaMiningXpLedgerIntegrationTest {
         assertTrue(new MariaMiningJournal(source).find(credit.instanceId()).isEmpty());
         assertTrue(ledger.findReceipt(credit.creditId()).isEmpty());
         assertEquals(account, ledger.findAccount(account.pickaxeId()).orElseThrow());
-        assertEquals(1, ledger.apply(credit, plan(account)).account().revision());
+        assertTrue(ledger.recoverOperation(credit, plan(account)).isEmpty());
+        assertEquals(MariaMiningJournal.AttemptState.COMMIT_FAILED, new MariaMiningJournal(source).incident(credit.creditId()).orElseThrow().state());
+        assertThrows(IllegalStateException.class, () -> ledger.apply(credit, plan(account)));
+        assertEquals(account, ledger.findAccount(account.pickaxeId()).orElseThrow());
     }
     @Test void lostCommitResponseRecoversWithoutAnotherXpIncrement() throws Exception {
         var credit = credit(); var plan = plan(account);
@@ -109,6 +112,113 @@ class MariaMiningXpLedgerIntegrationTest {
         }
     }
     /** Fault injection around real MariaDB operations; no deployment data or schema is modified. */
+    com.infinitygear.api.v1.MiningIncidentService.Evidence evidence(MiningCredit credit) {
+        return new com.infinitygear.api.v1.MiningIncidentService.Evidence(credit.creditId(), credit.playerId(), credit.pickaxeId(),
+                "Convict", UUID.randomUUID(), credit.worldId(), credit.x(), credit.y(), credit.z(), credit.originalBlockData(),
+                "NATURAL", "trusted test producer returned true; final AIR; unchanged generation/placement/mutation", "PHYSICAL_RETURN",
+                "TEST_COMPLETION", java.time.Instant.now(), Map.of("Paper", "26.2", "AxMines", "1.8.0", "InfinityGear", "test"), "test-config-1");
+    }
+    @Test void crashAfterPhysicalRemovalBeforeXpTransactionNeverReplays() throws Exception {
+        var credit = credit(); var plan = plan(account); var journal = new MariaMiningJournal(source); var evidence = evidence(credit);
+        assertTrue(journal.recordAttempt(evidence, credit.instanceId(), MariaMiningJournal.AttemptState.CONFIRMED));
+        // Simulated process loss at the durable marker: the physical world is deliberately not queried.
+        var restarted = new MariaMiningXpLedger(source);
+        assertTrue(restarted.recoverOperation(credit, plan).isEmpty());
+        assertThrows(IllegalStateException.class, () -> restarted.apply(credit, plan, evidence));
+        assertEquals(account, restarted.findAccount(account.pickaxeId()).orElseThrow());
+        assertTrue(journal.pendingNotifications(1000).stream().noneMatch(c -> c.creditId().equals(credit.creditId())));
+        var incident = journal.incident(credit.creditId()).orElseThrow();
+        assertEquals(evidence, incident.evidence()); assertEquals(MariaMiningJournal.AttemptState.COMMIT_FAILED, incident.state());
+        assertNotNull(incident.recordedAt()); assertNotNull(incident.updatedAt());
+    }
+    @Test void uncertainDurableAttemptIsForensicOnlyAndBecomesAmbiguous() throws Exception {
+        var credit = credit(); var journal = new MariaMiningJournal(source);
+        journal.recordAttempt(evidence(credit), credit.instanceId(), MariaMiningJournal.AttemptState.ATTEMPTED);
+        assertTrue(ledger.recoverOperation(credit, plan(account)).isEmpty());
+        assertEquals(MariaMiningJournal.AttemptState.AMBIGUOUS, journal.incident(credit.creditId()).orElseThrow().state());
+        assertThrows(IllegalStateException.class, () -> ledger.apply(credit, plan(account)));
+        assertTrue(journal.incidents(null, 1000).stream().anyMatch(i -> i.evidence().operationId().equals(credit.creditId())));
+        assertEquals(account, ledger.findAccount(account.pickaxeId()).orElseThrow());
+    }
+    @Test void crashBeforeAnyDurableRecordCannotInventIncidentOrReward() throws Exception {
+        var credit = credit();
+        assertTrue(ledger.recoverOperation(credit, plan(account)).isEmpty());
+        assertTrue(new MariaMiningJournal(source).incident(credit.creditId()).isEmpty());
+        assertEquals(account, ledger.findAccount(account.pickaxeId()).orElseThrow());
+    }
+    @Test void participantResolvesLostResponseByReceiptWithoutResubmission() throws Exception {
+        var callbacks = new LinkedBlockingQueue<Runnable>(); var credit = credit(); var plan = plan(account);
+        try (var bukkit = mockStatic(Bukkit.class); var tasks = new IntegrationTasks(Executors.newSingleThreadExecutor(), callbacks::add)) {
+            bukkit.when(Bukkit::isPrimaryThread).thenReturn(true);
+            var participant = new MiningXpParticipant(tasks, new MariaMiningXpLedger(faultSource(true)), id -> null);
+            var result = participant.apply(credit, plan);
+            var callback = callbacks.poll(5, TimeUnit.SECONDS); assertNotNull(callback); callback.run();
+            assertEquals(1, result.get(5, TimeUnit.SECONDS).receipt().account().revision());
+            assertEquals(1, ledger.findAccount(account.pickaxeId()).orElseThrow().revision());
+            assertEquals(MariaMiningJournal.AttemptState.COMMITTED, new MariaMiningJournal(source).incident(credit.creditId()).orElseThrow().state());
+        }
+    }
+    @Test void incidentPersistencePrecedesAlertsAndDuplicateCallsDoNotRealert() throws Exception {
+        var callbacks = new LinkedBlockingQueue<Runnable>(); var credit = credit(); var evidence = evidence(credit);
+        var alerts = org.mockito.Mockito.mock(com.infinitygear.mining.MiningIncidentAlerts.class);
+        Thread owner = Thread.currentThread();
+        DataSource checked = (DataSource) Proxy.newProxyInstance(getClass().getClassLoader(), new Class<?>[]{DataSource.class}, (p,m,a) -> {
+            assertNotSame(owner, Thread.currentThread(), "No JDBC on the server thread"); return invoke(m, source, a);
+        });
+        try (var tasks = new IntegrationTasks(Executors.newSingleThreadExecutor(), callbacks::add)) {
+            var recorder = new com.infinitygear.mining.MiningIncidentRecorder(tasks, new MariaMiningJournal(checked), alerts);
+            var saved = recorder.recordVoided(evidence).toCompletableFuture();
+            Runnable callback = callbacks.poll(5, TimeUnit.SECONDS); assertNotNull(callback);
+            org.mockito.Mockito.verifyNoInteractions(alerts);
+            assertEquals(evidence, new MariaMiningJournal(source).incident(credit.creditId()).orElseThrow().evidence());
+            callback.run(); assertTrue(saved.get(5, TimeUnit.SECONDS));
+            assertTrue(recorder.recordVoided(evidence).toCompletableFuture().get(5, TimeUnit.SECONDS));
+            org.mockito.Mockito.verify(alerts, org.mockito.Mockito.times(1)).persisted(org.mockito.ArgumentMatchers.any());
+        }
+    }
+    @Test void failedIncidentPersistenceNeverSchedulesStaffAlert() throws Exception {
+        var alerts = org.mockito.Mockito.mock(com.infinitygear.mining.MiningIncidentAlerts.class);
+        var unavailable = org.mockito.Mockito.mock(DataSource.class);
+        org.mockito.Mockito.when(unavailable.getConnection()).thenThrow(new SQLException("database unavailable"));
+        var callbacks = new LinkedBlockingQueue<Runnable>();
+        try (var tasks = new IntegrationTasks(Executors.newSingleThreadExecutor(), callbacks::add)) {
+            var recorder = new com.infinitygear.mining.MiningIncidentRecorder(tasks, new MariaMiningJournal(unavailable), alerts);
+            assertThrows(ExecutionException.class, () -> recorder.recordVoided(evidence(credit())).toCompletableFuture().get(5, TimeUnit.SECONDS));
+            assertTrue(callbacks.isEmpty()); org.mockito.Mockito.verifyNoInteractions(alerts);
+        }
+    }
+    @Test void contradictoryUnconfirmedReportDuringXpTransactionRollsBackReward() throws Exception {
+        var credit = credit(); var evidence = evidence(credit); var journal = new MariaMiningJournal(source); var fired = new AtomicBoolean();
+        DataSource intervening = (DataSource) Proxy.newProxyInstance(getClass().getClassLoader(), new Class<?>[]{DataSource.class}, (p,m,a) -> {
+            Object value = invoke(m, source, a);
+            if (!m.getName().equals("getConnection")) return value;
+            Connection connection = (Connection) value;
+            return Proxy.newProxyInstance(getClass().getClassLoader(), new Class<?>[]{Connection.class}, (cp,cm,ca) -> {
+                if (cm.getName().equals("prepareStatement") && ca[0].toString().startsWith("INSERT INTO infinitygear_mining_xp_receipts") && fired.compareAndSet(false,true))
+                    journal.recordVoided(evidence);
+                return invoke(cm, connection, ca);
+            });
+        });
+        assertThrows(IllegalStateException.class, () -> new MariaMiningXpLedger(intervening).apply(credit, plan(account), evidence));
+        assertTrue(fired.get()); assertTrue(ledger.findReceipt(credit.creditId()).isEmpty());
+        assertEquals(account, ledger.findAccount(account.pickaxeId()).orElseThrow());
+        assertEquals(MariaMiningJournal.AttemptState.AMBIGUOUS, journal.incident(credit.creditId()).orElseThrow().state());
+    }
+    @Test void failedConfirmedCommitPersistsIncidentAndNeverProjects() throws Exception {
+        var callbacks = new LinkedBlockingQueue<Runnable>(); var credit = credit(); var evidence = evidence(credit);
+        var alerts = org.mockito.Mockito.mock(com.infinitygear.mining.MiningIncidentAlerts.class);
+        try (var tasks = new IntegrationTasks(Executors.newSingleThreadExecutor(), callbacks::add)) {
+            var recorder = new com.infinitygear.mining.MiningIncidentRecorder(tasks, new MariaMiningJournal(source), alerts);
+            var participant = new MiningXpParticipant(tasks, new MariaMiningXpLedger(faultSource(false)), id -> { fail("No projection for voided commit"); return null; }, recorder);
+            var result = participant.complete(credit, plan(account), new com.infinitygear.mining.MiningCompletion(true,true,true,true,true,true,true,false), evidence);
+            var callback = callbacks.poll(5, TimeUnit.SECONDS); assertNotNull(callback); callback.run();
+            assertThrows(ExecutionException.class, () -> result.get(5, TimeUnit.SECONDS));
+            assertEquals(MariaMiningJournal.AttemptState.COMMIT_FAILED, new MariaMiningJournal(source).incident(credit.creditId()).orElseThrow().state());
+            assertEquals(account, ledger.findAccount(account.pickaxeId()).orElseThrow());
+            assertThrows(IllegalStateException.class, () -> ledger.apply(credit, plan(account), evidence));
+            org.mockito.Mockito.verify(alerts).persisted(org.mockito.ArgumentMatchers.any());
+        }
+    }
     DataSource faultSource(boolean loseCommitResponse) {
         var fired = new AtomicBoolean();
         return (DataSource) Proxy.newProxyInstance(getClass().getClassLoader(), new Class<?>[]{DataSource.class}, (proxy, method, args) -> {

@@ -14,6 +14,17 @@ import org.junit.jupiter.api.Test;
 import static org.mockito.Mockito.*;
 
 class MiningXpListenerTest {
+    @Test void ownedReplacementNeverReachesLegacyXpEvenWithoutManagedTool() {
+        var plugin = mock(InfinityPickaxes.class); var server = mock(Server.class); var services = mock(org.bukkit.plugin.ServicesManager.class);
+        when(plugin.getServer()).thenReturn(server); when(server.getServicesManager()).thenReturn(services);
+        var owner = mock(com.infinitygear.api.v1.MiningEventOwner.class);
+        var registration = new org.bukkit.plugin.RegisteredServiceProvider<>(com.infinitygear.api.v1.MiningEventOwner.class, owner, org.bukkit.plugin.ServicePriority.Normal, plugin);
+        when(services.getRegistrations(com.infinitygear.api.v1.MiningEventOwner.class)).thenReturn(java.util.List.of(registration));
+        var block = mock(Block.class); when(block.getType()).thenReturn(mock(Material.class));
+        var event = new BlockBreakEvent(block, mock(Player.class)); when(owner.owns(event)).thenReturn(true);
+        var listener = new BlockBreakListener(plugin, null); listener.capture(event); listener.onBlockBreak(event);
+        verify(plugin, never()).getPickaxeManager(); verify(plugin, never()).getLevelManager();
+    }
     @Test void veinOriginalNestedThenOuterAwardsOnceAndNeverForAir() {
         var plugin = mock(InfinityPickaxes.class); var config = mock(ConfigManager.class);
         when(plugin.getConfigManager()).thenReturn(config);

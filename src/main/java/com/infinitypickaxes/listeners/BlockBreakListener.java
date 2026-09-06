@@ -36,6 +36,13 @@ public class BlockBreakListener implements Listener {
         // Nested Vein breaks may have removed the original before the outer MONITOR callback.
         // This is a legacy XP safeguard, NOT an authoritative successful-break/generation notification.
         if (snapshot == null || snapshot.material().isAir() || event.getBlock().getType().isAir() || snapshot.placed()) return;
+        var server = plugin.getServer();
+        if (server != null) {
+            for (var registration : server.getServicesManager().getRegistrations(com.infinitygear.api.v1.MiningEventOwner.class)) {
+                try { if (registration.getProvider().owns(event)) return; }
+                catch (RuntimeException unavailable) { return; } // No raw-event fallback when ownership cannot be checked.
+            }
+        }
         Player player = event.getPlayer();
         if (!player.hasPermission("infinitypickaxes.use")) return;
         ItemStack held = player.getInventory().getItemInMainHand();

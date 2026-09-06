@@ -19,11 +19,12 @@ class MariaMiningJournalIntegrationTest {
         assertEquals(new MariaMiningJournal.Entry(recovery, MariaMiningJournal.State.RECOVERY_REQUIRED), restarted.find(recovery.instanceId()).orElseThrow());
         assertEquals(new MariaMiningJournal.Entry(completed, MariaMiningJournal.State.COMPLETED), restarted.find(completed.instanceId()).orElseThrow());
         assertTrue(restarted.find(UUID.randomUUID()).isEmpty());
-        assertFalse(new MiningCoordinator(restarted).credit(reserved, () -> fail("Inspection cannot release a reservation"), c -> fail()));
-        assertFalse(new MiningCoordinator(restarted).credit(recovery, () -> fail("Inspection cannot retry uncertain XP"), c -> fail()));
+        assertThrows(IllegalStateException.class, () -> new MiningCoordinator(restarted).credit(reserved, () -> fail("Inspection cannot release a reservation"), c -> fail()));
+        assertThrows(IllegalStateException.class, () -> new MiningCoordinator(restarted).credit(recovery, () -> fail("Inspection cannot retry uncertain XP"), c -> fail()));
         assertFalse(restarted.pendingNotifications(1000).contains(recovery));
         assertFalse(restarted.pendingNotifications(1000).contains(reserved));
-        journal.notificationDelivered(completed.creditId());
+        assertFalse(restarted.pendingNotifications(1000).contains(completed));
+        assertThrows(IllegalStateException.class, () -> journal.notificationDelivered(completed.creditId()));
     }
     @Test void recoveryPagesUseExclusiveInstanceCursorAndExcludeCompletedRows() throws Exception {
         var journal = new MariaMiningJournal(source()); journal.migrate();
@@ -50,7 +51,7 @@ class MariaMiningJournalIntegrationTest {
             }
         }
         assertTrue(seen.containsAll(expected)); assertFalse(seen.contains(completed.instanceId()));
-        journal.notificationDelivered(completed.creditId());
+        assertThrows(IllegalStateException.class, () -> journal.notificationDelivered(completed.creditId()));
     }
     @Test void invalidRecoveryBoundsRejectWithoutTouchingDatabase() {
         var journal = new MariaMiningJournal(null);
@@ -71,18 +72,17 @@ class MariaMiningJournalIntegrationTest {
     @Test void failedNotificationReplaysExactCreditAfterRestartWithoutAwardingXpAgain() throws Exception {
         var source = source();
         var journal = new MariaMiningJournal(source); journal.migrate();
-        var credit = credit(); var xp = new AtomicInteger();
-        assertThrows(IllegalStateException.class, () -> new MiningCoordinator(journal).credit(credit,
-                xp::incrementAndGet, c -> { throw new IllegalStateException("Interrupted delivery"); }));
+        var credit = credit(); var ledger = new MariaMiningXpLedger(source);
+        var receipt = commit(ledger, credit, null);
         var restarted = new MariaMiningJournal(source); restarted.migrate();
         assertTrue(restarted.pendingNotifications(1000).contains(credit));
         // Reading repeatedly or concurrently is safe but intentionally permits duplicate delivery.
         assertTrue(journal.pendingNotifications(1000).contains(credit));
-        assertFalse(new MiningCoordinator(restarted).credit(credit, xp::incrementAndGet, c -> fail()));
+        assertEquals(receipt, ledger.recoverOperation(credit, receipt.plan()).orElseThrow());
         restarted.notificationDelivered(credit.creditId());
         journal.notificationDelivered(credit.creditId());
         assertFalse(restarted.pendingNotifications(1000).contains(credit));
-        assertEquals(1, xp.get());
+        assertEquals(1, ledger.findAccount(credit.pickaxeId()).orElseThrow().progress().blocksMined());
     }
     @Test void onlyCompletedCreditsEnterOutboxAndAcknowledge() throws Exception {
         var journal = new MariaMiningJournal(source()); journal.migrate(); journal.migrate();
@@ -95,15 +95,15 @@ class MariaMiningJournalIntegrationTest {
         assertFalse(journal.pendingNotifications(1000).contains(reserved));
         assertFalse(journal.pendingNotifications(1000).contains(recovery));
         journal.complete(completed.instanceId());
-        assertTrue(journal.pendingNotifications(1000).contains(completed));
-        journal.notificationDelivered(completed.creditId());
+        assertFalse(journal.pendingNotifications(1000).contains(completed));
+        assertThrows(IllegalStateException.class, () -> journal.notificationDelivered(completed.creditId()));
         assertThrows(IllegalArgumentException.class, () -> journal.pendingNotifications(0));
         assertThrows(IllegalArgumentException.class, () -> journal.pendingNotifications(1001));
     }
-    @Test void successfulNotificationIsAcknowledgedByCoordinator() throws Exception {
+    @Test void callbackCoordinatorCannotBypassAtomicReceiptBoundary() throws Exception {
         var journal = new MariaMiningJournal(source()); journal.migrate();
         var credit = credit();
-        assertTrue(new MiningCoordinator(journal).credit(credit, () -> {}, c -> assertEquals(credit, c)));
+        assertThrows(IllegalStateException.class, () -> new MiningCoordinator(journal).credit(credit, () -> fail("No callback XP"), c -> fail("No callback reward")));
         assertFalse(journal.pendingNotifications(1000).contains(credit));
     }
     @Test void durablePhysicalIdentitySurvivesCoordinatorRestartAndAllowsNextGeneration() throws Exception {
@@ -113,13 +113,17 @@ class MariaMiningJournalIntegrationTest {
         var journal = new MariaMiningJournal(source); journal.migrate(); journal.migrate();
         var credit = new MiningCredit(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), "infinitygear:pickaxe",
                 UUID.randomUUID(), 1, 2, 3, "minecraft:stone", MiningCredit.Source.NORMAL, "reset-1", true, true);
-        var count = new AtomicInteger();
-        assertTrue(new MiningCoordinator(journal).credit(credit, count::incrementAndGet, c -> {}));
-        var restarted = new MiningCoordinator(new MariaMiningJournal(source));
-        assertFalse(restarted.credit(credit, count::incrementAndGet, c -> fail()));
+        var ledger = new MariaMiningXpLedger(source); var first = commit(ledger, credit, null);
+        var restarted = new MariaMiningXpLedger(source);
+        assertEquals(first, restarted.apply(credit, first.plan()));
         var regenerated = new MiningCredit(UUID.randomUUID(), UUID.randomUUID(), credit.playerId(), credit.pickaxeId(), credit.profileId(),
                 credit.worldId(), 1, 2, 3, "minecraft:stone", credit.source(), "reset-2", true, true);
-        assertTrue(restarted.credit(regenerated, count::incrementAndGet, c -> {}));
-        assertEquals(2, count.get());
+        var second = commit(restarted, regenerated, first.account());
+        assertEquals(2, second.account().progress().blocksMined());
+    }
+    private MariaMiningXpLedger.Receipt commit(MariaMiningXpLedger ledger, MiningCredit credit,
+                                               com.infinitygear.mining.MiningXpPlan.Account account) throws Exception {
+        if (account == null) account = ledger.initialize(credit.pickaxeId(), credit.profileId(), new com.infinitygear.mining.MiningXpPlan.Progress(0,0,0));
+        return ledger.apply(credit, new com.infinitygear.mining.MiningXpPlan(credit.pickaxeId(), credit.profileId(), account.revision(), account.progress(), 1, List.of(100.0)));
     }
 }
