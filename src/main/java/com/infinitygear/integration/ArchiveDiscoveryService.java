@@ -58,18 +58,43 @@ public final class ArchiveDiscoveryService implements ArchiveIntegrationService 
     }
 
     @Override public Map<String, Capability> capabilities() {
-        return Map.of("discovery", new Capability(true, "Poll snapshot revision on the server thread"),
-                "book-recovery", new Capability(plugin.getServer().getServicesManager().load(com.infinitygear.api.v1.BookIssuanceService.class) != null,
-                        "Saved item recovery requires MariaDB; new issuance also requires provenance authority"),
-                "book-issuance", new Capability(plugin.getServer().getServicesManager().load(com.infinitygear.api.v1.BookIssuanceService.class) != null
+        var producer = miningProducerCapabilities();
+        var ordinary = producer.get(com.infinitygear.api.v1.MiningAuthority.Path.ORDINARY);
+        var blast = producer.get(com.infinitygear.api.v1.MiningAuthority.Path.BLAST_MINING);
+        var dynamite = producer.get(com.infinitygear.api.v1.MiningAuthority.Path.DYNAMITE);
+        var vein = producer.get(com.infinitygear.api.v1.MiningAuthority.Path.VEIN_MINER);
+        var setblock = producer.get(com.infinitygear.api.v1.MiningAuthority.Path.SETBLOCK);
+        var natural = producer.get(com.infinitygear.api.v1.MiningAuthority.Path.BREAK_NATURALLY);
+        boolean aoe = blast.supported() && dynamite.supported() && vein.supported();
+        return Map.ofEntries(Map.entry("discovery", new Capability(true, "Poll snapshot revision on the server thread")),
+                Map.entry("book-recovery", new Capability(plugin.getServer().getServicesManager().load(com.infinitygear.api.v1.BookIssuanceService.class) != null,
+                        "Saved item recovery requires MariaDB; new issuance also requires provenance authority")),
+                Map.entry("book-issuance", new Capability(plugin.getServer().getServicesManager().load(com.infinitygear.api.v1.BookIssuanceService.class) != null
                         && plugin.getServer().getServicesManager().load(com.infinitygear.api.v1.BookIssuanceService.ProvenanceAuthority.class) != null,
-                        "Requires configured MariaDB journal and issuance authority"),
-                "book-lifecycle", new Capability(false, "Requires product policy and inventory participant recovery"),
-                "strict-mining", new Capability(false, "Confirmed-only/fail-closed: AxMines guarded diagnostics lack validated mutation/protection authority; XP adoption/custody and durable receiver are not wired"),
-                "mining-setblock", new Capability(false, "Direct setblock has no authoritative producer completion hook"),
-                "mining-breakNaturally", new Capability(false, "breakNaturally has no authoritative producer completion hook"),
-                "mining-normal", new Capability(false, "AxMines replacement/original listener timing and protection transparency require live acceptance"),
-                "mining-aoe", new Capability(false, "Nested accounting, reset timing and actual Blast/Dynamite/Vein behavior require live acceptance"),
-                "mining-world-edits", new Capability(false, "Unobservable external edits and placement/movement attribution have no authoritative completion evidence"));
+                        "Requires configured MariaDB journal and issuance authority")),
+                Map.entry("book-lifecycle", new Capability(false, "Requires product policy and inventory participant recovery")),
+                Map.entry("strict-mining", new Capability(false, "Producer capability is separate; XP adoption/custody and a durable receiver are not wired")),
+                Map.entry("mining-setblock", new Capability(setblock.supported(), setblock.evidence())),
+                Map.entry("mining-breakNaturally", new Capability(natural.supported(), natural.evidence())),
+                Map.entry("mining-normal", new Capability(ordinary.supported(), ordinary.evidence())),
+                Map.entry("mining-blast", new Capability(blast.supported(), blast.evidence())),
+                Map.entry("mining-dynamite", new Capability(dynamite.supported(), dynamite.evidence())),
+                Map.entry("mining-vein", new Capability(vein.supported(), vein.evidence())),
+                Map.entry("mining-aoe", new Capability(aoe, aoe ? "All three AoE producer paths are fenced" : "Requires fenced Blast, Dynamite and Vein producer paths")),
+                Map.entry("mining-world-edits", new Capability(false, "Direct/unobservable external edits remain outside the producer boundary")));
+    }
+
+    private EnumMap<com.infinitygear.api.v1.MiningAuthority.Path, com.infinitygear.api.v1.MiningAuthority.Capability> miningProducerCapabilities() {
+        var result = new EnumMap<com.infinitygear.api.v1.MiningAuthority.Path, com.infinitygear.api.v1.MiningAuthority.Capability>(com.infinitygear.api.v1.MiningAuthority.Path.class);
+        var unavailable = new com.infinitygear.api.v1.MiningAuthority.Capability(false, "No authoritative mining producer registered");
+        for (var path : com.infinitygear.api.v1.MiningAuthority.Path.values()) result.put(path, unavailable);
+        var authority = plugin.getServer().getServicesManager().load(com.infinitygear.api.v1.MiningAuthority.class);
+        if (authority == null) return result;
+        try { result.putAll(authority.capabilities()); }
+        catch (RuntimeException invalid) {
+            for (var path : com.infinitygear.api.v1.MiningAuthority.Path.values())
+                result.put(path, new com.infinitygear.api.v1.MiningAuthority.Capability(false, "Mining producer capability query failed closed"));
+        }
+        return result;
     }
 }

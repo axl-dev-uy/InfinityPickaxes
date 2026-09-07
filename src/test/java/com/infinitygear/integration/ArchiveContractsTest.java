@@ -3,6 +3,7 @@ package com.infinitygear.integration;
 import com.infinitygear.api.v1.*;
 import org.junit.jupiter.api.Test;
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -32,7 +33,19 @@ class ArchiveContractsTest {
     }
     @Test void dtoSignaturesDoNotExposeImplementationPackages() {
         for (Class<?> type : List.of(ArchiveIntegrationService.class, BookLedger.class, BookIssuanceService.class,
-                MiningAuthority.class, MiningCredit.class, ProvenancePolicy.class, ProvenanceTransition.class)) check(type);
+                MiningAuthority.class, MiningCompletion.class, MiningCredit.class,
+                ProvenancePolicy.class, ProvenanceTransition.class)) check(type);
+    }
+    @Test void miningCompletionRequiresEveryConfirmedPhysicalFact() {
+        var completion = new MiningCompletion(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), "acceptance", UUID.randomUUID(),
+                1, 2, 3, "minecraft:stone", MiningCredit.Source.NORMAL, "NATURAL",
+                true, true, true, true, true, true, false, Instant.now(), Map.of("producer", "test"), "fence-1");
+        assertTrue(completion.confirmed());
+        assertFalse(new MiningCompletion(completion.completionId(), completion.instanceId(), completion.operationId(),
+                completion.playerId(), completion.itemId(), completion.worldId(), completion.mine(), completion.generationId(),
+                completion.x(), completion.y(), completion.z(), completion.originalBlockData(), completion.source(), completion.placement(),
+                true, true, true, true, true, false, false, completion.observedAt(), completion.versions(), completion.configurationRevision()).confirmed());
     }
     private void check(Class<?> type) {
         for (var method : type.getDeclaredMethods()) {

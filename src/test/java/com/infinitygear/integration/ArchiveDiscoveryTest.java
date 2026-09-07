@@ -1,6 +1,7 @@
 package com.infinitygear.integration;
 
 import com.infinitygear.api.v1.ArchiveIntegrationService;
+import com.infinitygear.api.v1.MiningAuthority;
 import com.infinitygear.api.InfinityGearService;
 import com.infinitygear.enchant.ResolvedEnchantmentPolicy;
 import com.infinitygear.gear.*;
@@ -51,5 +52,24 @@ class ArchiveDiscoveryTest {
             assertSame(service, services.load(ArchiveIntegrationService.class));
             services.unregisterAll(plugin); assertNull(services.load(ArchiveIntegrationService.class));
         }
+    }
+    @Test void reportsProducerPathsIndependentlyWithoutActivatingStrictMining() {
+        var plugin = mock(InfinityPickaxes.class);
+        var server = mock(org.bukkit.Server.class);
+        var services = mock(org.bukkit.plugin.ServicesManager.class);
+        when(plugin.getServer()).thenReturn(server);
+        when(server.getServicesManager()).thenReturn(services);
+        var authority = mock(MiningAuthority.class);
+        when(authority.capabilities()).thenReturn(Map.of(
+                MiningAuthority.Path.ORDINARY, new MiningAuthority.Capability(true, "fenced ordinary"),
+                MiningAuthority.Path.BLAST_MINING, new MiningAuthority.Capability(true, "fenced blast")));
+        when(services.load(MiningAuthority.class)).thenReturn(authority);
+
+        var capabilities = new ArchiveDiscoveryService(plugin).capabilities();
+        assertTrue(capabilities.get("mining-normal").available());
+        assertTrue(capabilities.get("mining-blast").available());
+        assertFalse(capabilities.get("mining-dynamite").available());
+        assertFalse(capabilities.get("mining-aoe").available());
+        assertFalse(capabilities.get("strict-mining").available());
     }
 }
