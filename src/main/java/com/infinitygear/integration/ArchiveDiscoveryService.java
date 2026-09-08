@@ -73,7 +73,7 @@ public final class ArchiveDiscoveryService implements ArchiveIntegrationService 
                         && plugin.getServer().getServicesManager().load(com.infinitygear.api.v1.BookIssuanceService.ProvenanceAuthority.class) != null,
                         "Requires configured MariaDB journal and issuance authority")),
                 Map.entry("book-lifecycle", new Capability(false, "Requires product policy and inventory participant recovery")),
-                Map.entry("strict-mining", new Capability(false, "Producer capability is separate; XP adoption/custody and a durable receiver are not wired")),
+                Map.entry("strict-mining", new Capability(false, "Requires an authoritative supported-path producer and a registered durable deduplicating receiver")),
                 Map.entry("mining-setblock", new Capability(setblock.supported(), setblock.evidence())),
                 Map.entry("mining-breakNaturally", new Capability(natural.supported(), natural.evidence())),
                 Map.entry("mining-normal", new Capability(ordinary.supported(), ordinary.evidence())),
