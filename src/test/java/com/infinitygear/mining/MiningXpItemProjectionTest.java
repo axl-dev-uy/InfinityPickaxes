@@ -47,6 +47,7 @@ class MiningXpItemProjectionTest {
                     var value = copy.get(a.getArgument(0)); return value != null && value.type().equals(a.getArgument(1));
                 });
                 doAnswer(a -> { copy.put(a.getArgument(0), new Value(a.getArgument(1), a.getArgument(2))); return null; }).when(pdc).set(any(), any(), any());
+                doAnswer(a -> { copy.remove(a.getArgument(0)); return null; }).when(pdc).remove(any());
                 return meta;
             });
             when(stack.setItemMeta(any())).thenAnswer(a -> { values = new HashMap<>(copies.get(a.getArgument(0))); saves++; return true; });
@@ -128,6 +129,46 @@ class MiningXpItemProjectionTest {
             gear.xp(current.xp()); GearData.save(gear, false, true);
             assertEquals(2, item.saves);
             assertEquals(1L, item.values.get(MiningXpItemProjection.REVISION).value());
+        }
+    }
+    @Test void adoptionFenceClosesLegacyWriterWindowBeforeDatabaseWork() {
+        try (var bukkit = mockStatic(Bukkit.class)) {
+            bukkit.when(Bukkit::isPrimaryThread).thenReturn(true);
+            var receipt = receipt(); var item = new Item(receipt.plan()); var projection = new MiningXpItemProjection();
+            UUID token = UUID.randomUUID();
+            var fence = projection.beginAdoption(item.stack, token);
+            assertTrue(MiningXpItemProjection.isManaged(item.stack));
+            assertEquals(token.toString(), item.values.get(MiningXpItemProjection.ADOPTION).value());
+            assertThrows(IllegalStateException.class, () -> MiningXpItemProjection.requireUnchangedProgress(
+                    item.stack, fence.baseline().level(), fence.baseline().xp() + 1, fence.baseline().blocksMined()));
+            var account = new MiningXpPlan.Account(fence.pickaxeId(), fence.profileId(), 0, fence.baseline());
+            assertEquals(MiningXpItemProjection.Result.APPLIED, projection.completeAdoption(item.stack, fence, account));
+            assertEquals(0L, item.values.get(MiningXpItemProjection.REVISION).value());
+            assertFalse(item.values.containsKey(MiningXpItemProjection.ADOPTION));
+        }
+    }
+    @Test void adoptionRejectsQuarantineWithoutWritingFence() {
+        try (var bukkit = mockStatic(Bukkit.class)) {
+            bukkit.when(Bukkit::isPrimaryThread).thenReturn(true);
+            var receipt = receipt(); var item = new Item(receipt.plan());
+            item.put(GearData.KEY_QUARANTINED, PersistentDataType.BYTE, (byte) 1);
+            assertThrows(IllegalStateException.class, () -> new MiningXpItemProjection().beginAdoption(item.stack, UUID.randomUUID()));
+            assertFalse(item.values.containsKey(MiningXpItemProjection.ADOPTION));
+        }
+    }
+    @Test void orphanedAdoptionMarkerSurvivesRestartAndRejectsTheWrongDurableToken() {
+        try (var bukkit = mockStatic(Bukkit.class)) {
+            bukkit.when(Bukkit::isPrimaryThread).thenReturn(true);
+            var receipt = receipt(); var item = new Item(receipt.plan());
+            var fence = new MiningXpItemProjection().beginAdoption(item.stack, UUID.randomUUID());
+            var restarted = new MiningXpItemProjection();
+            var wrong = new MiningXpItemProjection.AdoptionFence(UUID.randomUUID(), fence.pickaxeId(),
+                    fence.profileId(), fence.baseline());
+            var account = new MiningXpPlan.Account(fence.pickaxeId(), fence.profileId(), 0, fence.baseline());
+            assertEquals(MiningXpItemProjection.Result.CONFLICT, restarted.completeAdoption(item.stack, wrong, account));
+            assertTrue(MiningXpItemProjection.isManaged(item.stack));
+            assertEquals(fence.adoptionId().toString(), item.values.get(MiningXpItemProjection.ADOPTION).value());
+            assertFalse(item.values.containsKey(MiningXpItemProjection.REVISION));
         }
     }
 }

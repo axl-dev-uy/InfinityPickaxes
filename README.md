@@ -97,7 +97,9 @@ Detection is observational. It cannot prove detection of copies that are never s
 - `/igear artifact <runic_eraser|runic_conduit|runic_rivet> <player>`: issue a tracked singleton.
 - `/igear station bind <type>`, `status`, and `unbind`: manage exact proprietary station instances.
 - `/igear station <runic-table|fusion-altar|gear-forge>`: administrator/test GUI bypass.
-- `/igear reload`, `setlevel`, `addxp`, `duplicate ...`, and `migration`: administration and diagnostics.
+- `/igear xp adopt <player>`: explicitly place one uniquely held, non-quarantined EXPERIENCE item under MariaDB XP authority. Automatic adoption remains disabled.
+- `/igear xp reconcile <uuid>` and `/igear xp issues`: retry receipt-only projection after physical custody is corrected and inspect durable fail-closed reconciliation records. Conflicts are never overwritten automatically.
+- `/igear reload`, `setlevel`, `addxp`, `duplicate ...`, and `migration`: administration and diagnostics. For adopted items, `setlevel` and `addxp` use atomic ledger receipts and ordered absolute projection rather than legacy item writes.
 - `/ipickaxe` and `/infinitypickaxe` remain deprecated aliases with `infinitypickaxes.*` compatibility permissions. Generic `/pickaxe` is intentionally not claimed.
 
 See `plugin.yml` for granular give, artifact, reload, station, migration, duplicate, and station-bypass permissions. Locale/config synchronization only adds missing defaults and does not overwrite administrator edits.
@@ -109,4 +111,4 @@ See `plugin.yml` for granular give, artifact, reload, station, migration, duplic
 ./gradlew build
 ```
 
-The production artifact is `build/libs/InfinityGear-2.0.0-SNAPSHOT.jar`. Unit tests cover pure enchantment/fusion/cost/transform/socket rules, compensation, inventory capacity, PDC parsing, data-folder idempotency, SQLite record migration, duplicate scanner hardening, GUI cancellation, commands, and legacy behavior. A real Paper test server is still required to exercise plugin lifecycle, EcoEnchants/Nexo/Vault event timing, rendered menus, persistence across restarts, and production inventory interaction end to end.
+The production artifact is `build/libs/InfinityGear-2.0.0-SNAPSHOT.jar`. Unit tests cover pure enchantment/fusion/cost/transform/socket rules, compensation, inventory capacity, PDC parsing, data-folder idempotency, SQLite record migration, duplicate scanner hardening, GUI cancellation, commands, legacy behavior, XP adoption fencing, and Paper lifecycle recovery scheduling. Disposable MariaDB tests cover migration 8, adoption/admin idempotency, reconciliation, and presentation claims. A real Paper test server is still required to exercise EcoEnchants/Nexo/Vault event timing, rendered menus, native inventory persistence across process restarts, and production inventory interaction end to end.

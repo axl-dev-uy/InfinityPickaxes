@@ -55,6 +55,7 @@ public class InfinityPickaxes extends JavaPlugin {
     private CostRegistry costRegistry;
     private MoneyGateway moneyGateway;
     private com.infinitygear.integration.ArchiveIntegrationBootstrap archiveIntegration;
+    private com.infinitygear.mining.XpActivationService xpActivation;
 
     @Override
     public void onEnable() {
@@ -313,6 +314,8 @@ public class InfinityPickaxes extends JavaPlugin {
     public StationManager getStationManager() { return stationManager; }
     public CostRegistry getCostRegistry() { return costRegistry; }
     public MoneyGateway getMoneyGateway() { return moneyGateway; }
+    public com.infinitygear.mining.XpActivationService getXpActivation() { return xpActivation; }
+    public void setXpActivation(com.infinitygear.mining.XpActivationService service) { this.xpActivation = service; }
 
     private MoneyGateway createMoneyGateway() {
         if (!getServer().getPluginManager().isPluginEnabled("Vault")) return new UnavailableMoneyGateway();

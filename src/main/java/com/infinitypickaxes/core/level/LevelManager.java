@@ -9,6 +9,8 @@ import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.entity.Player;
+import org.bukkit.inventory.ItemStack;
+import com.infinitypickaxes.core.pickaxe.PickaxeData;
 
 public class LevelManager {
 
@@ -97,24 +99,26 @@ public class LevelManager {
         pickaxe.saveAndSync();
 
         if (leveledUp && player != null) {
-            int newLevel = pickaxe.getLevel();
-            // Call Custom Event
+            presentCommittedLevelUp(player, pickaxe.getItemStack(), oldLevel, pickaxe.getLevel());
+        }
+    }
+
+    /** Presents one already-committed absolute level transition; callers durably deduplicate it. */
+    public void presentCommittedLevelUp(Player player, ItemStack item, int oldLevel, int newLevel) {
+        if (!Bukkit.isPrimaryThread()) throw new IllegalStateException("Server thread required");
+        if (player == null || item == null || newLevel <= oldLevel) return;
+        InfinityPickaxe pickaxe = PickaxeData.fromItemStack(item);
+        if (pickaxe != null) {
             PickaxeLevelUpEvent event = new PickaxeLevelUpEvent(player, pickaxe, oldLevel, newLevel);
             Bukkit.getPluginManager().callEvent(event);
-
-            // Play Sound
-            if (soundEnabled) {
-                player.playSound(player.getLocation(), levelupSound, soundVolume, soundPitch);
-            }
-
-            // Play Particles
-            if (particlesEnabled) {
-                player.getWorld().spawnParticle(levelupParticle, player.getLocation().add(0, 1, 0), particleCount, 0.5, 0.5, 0.5, 0.1);
-            }
-
-            // Send Messages / Titles / Actionbars
             plugin.getMessageManager().sendLevelUp(player, pickaxe, oldLevel, newLevel);
+        } else {
+            plugin.getMessageManager().sendRawMessage(player, "<green>Gear level increased from <yellow>%old%</yellow> to <yellow>%new%</yellow>.</green>",
+                    "%old%", String.valueOf(oldLevel), "%new%", String.valueOf(newLevel));
         }
+        if (soundEnabled) player.playSound(player.getLocation(), levelupSound, soundVolume, soundPitch);
+        if (particlesEnabled) player.getWorld().spawnParticle(levelupParticle,
+                player.getLocation().add(0, 1, 0), particleCount, 0.5, 0.5, 0.5, 0.1);
     }
 
     public int getMaxLevel() {

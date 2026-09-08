@@ -74,6 +74,7 @@ public class InfinityPickaxeCommand implements CommandExecutor, TabCompleter {
             return handleArtifactGive(sender, label, args);
         }
         if (gearCommand && sub.equals("station")) return handleStation(sender, label, args);
+        if (gearCommand && sub.equals("xp")) return handleXp(sender, label, args);
         if (gearCommand && sub.equals("migration")) {
             if (!hasPermissionOrAdmin(sender, "infinitygear.admin.migration")) { plugin.getMessageManager().sendMessage(sender, "messages.no-permission"); return true; }
             java.nio.file.Path marker = plugin.getDataFolder().toPath()
@@ -220,7 +221,10 @@ public class InfinityPickaxeCommand implements CommandExecutor, TabCompleter {
                     return true;
                 }
                 if (com.infinitygear.mining.MiningXpItemProjection.isManaged(target.getInventory().getItemInMainHand())) {
-                    sender.sendMessage("§cThis item's XP and level are managed by the mining ledger; legacy progression commands are unavailable.");
+                    var activation = plugin.getXpActivation();
+                    if (activation == null) { sender.sendMessage("§cThe MariaDB XP participant is unavailable."); return true; }
+                    try { replyAsync(sender, activation.setLevel(sender, target, Integer.parseInt(args[2]))); }
+                    catch (NumberFormatException invalid) { sender.sendMessage("§cInvalid level."); }
                     return true;
                 }
                 if (gearCommand) {
@@ -268,7 +272,10 @@ public class InfinityPickaxeCommand implements CommandExecutor, TabCompleter {
                     return true;
                 }
                 if (com.infinitygear.mining.MiningXpItemProjection.isManaged(target.getInventory().getItemInMainHand())) {
-                    sender.sendMessage("§cThis item's XP and level are managed by the mining ledger; legacy progression commands are unavailable.");
+                    var activation = plugin.getXpActivation();
+                    if (activation == null) { sender.sendMessage("§cThe MariaDB XP participant is unavailable."); return true; }
+                    try { replyAsync(sender, activation.addXp(sender, target, Double.parseDouble(args[2]))); }
+                    catch (NumberFormatException invalid) { sender.sendMessage("§cInvalid XP amount."); }
                     return true;
                 }
                 if (gearCommand) {
@@ -321,8 +328,57 @@ public class InfinityPickaxeCommand implements CommandExecutor, TabCompleter {
             sender.sendMessage("§e/ipickaxe addxp <player> <amount> §7- Adds XP to pickaxe.");
             sender.sendMessage("§e/ipickaxe reload §7- Reloads configurations and menus.");
             sender.sendMessage("§e/ipickaxe duplicate §7- Duplicate detection and quarantine administration.");
+            sender.sendMessage("§e/igear xp <adopt|reconcile|issues> §7- MariaDB XP custody and recovery.");
         }
         sender.sendMessage("§8▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬");
+    }
+
+    private boolean handleXp(CommandSender sender, String label, String[] args) {
+        if (!hasPermissionOrAdmin(sender, "infinitygear.admin.xp")) {
+            plugin.getMessageManager().sendMessage(sender, "messages.no-permission"); return true;
+        }
+        var activation = plugin.getXpActivation();
+        if (activation == null) { sender.sendMessage("§cThe MariaDB XP participant is unavailable."); return true; }
+        if (args.length < 2) { sender.sendMessage("§e/" + label + " xp <adopt player|reconcile uuid|issues>"); return true; }
+        try {
+            switch (args[1].toLowerCase(java.util.Locale.ROOT)) {
+                case "adopt" -> {
+                    if (args.length < 3) throw new IllegalArgumentException("Specify an online player holding the sole canonical item.");
+                    Player target = Bukkit.getPlayer(args[2]);
+                    if (target == null) throw new IllegalArgumentException("Player is not online.");
+                    sender.sendMessage("§eBeginning fenced XP adoption; the item is fail-closed immediately.");
+                    replyAsync(sender, activation.adopt(sender, target));
+                }
+                case "reconcile" -> {
+                    UUID id = requireUuid(args, 2);
+                    sender.sendMessage("§eInspecting custody and committed receipts without overwriting conflicts.");
+                    replyAsync(sender, activation.recover(id));
+                }
+                case "issues" -> activation.issues().whenComplete((issues, failure) -> Bukkit.getScheduler().runTask(plugin, () -> {
+                    if (failure != null) { sender.sendMessage("§cCould not read XP reconciliation records."); return; }
+                    sender.sendMessage("§6Unresolved XP reconciliation records: §f" + issues.size());
+                    issues.forEach(issue -> sender.sendMessage("§8- §f" + issue.pickaxeId() + " §7[§e" + issue.status()
+                            + "§7] §8" + issue.detail() + " @ " + issue.location()));
+                }));
+                default -> throw new IllegalArgumentException("Unknown XP subcommand.");
+            }
+        } catch (IllegalArgumentException invalid) { sender.sendMessage("§c" + invalid.getMessage()); }
+        return true;
+    }
+
+    private void replyAsync(CommandSender sender, java.util.concurrent.CompletableFuture<com.infinitygear.mining.XpActivationService.Report> future) {
+        future.whenComplete((report, failure) -> Bukkit.getScheduler().runTask(plugin, () -> {
+            if (failure != null) {
+                Throwable cause = failure instanceof java.util.concurrent.CompletionException && failure.getCause() != null
+                        ? failure.getCause() : failure;
+                sender.sendMessage("§cXP operation failed closed: " + (cause.getMessage() == null ? cause.getClass().getSimpleName() : cause.getMessage()));
+            } else sender.sendMessage((report.state() == com.infinitygear.mining.XpActivationService.State.CONFLICT
+                    || report.state() == com.infinitygear.mining.XpActivationService.State.DUPLICATED
+                    || report.state() == com.infinitygear.mining.XpActivationService.State.QUARANTINED
+                    || report.state() == com.infinitygear.mining.XpActivationService.State.MISSING
+                    || report.state() == com.infinitygear.mining.XpActivationService.State.STALE ? "§c" : "§a")
+                    + report.state() + ": §f" + report.detail());
+        }));
     }
 
     private void handleDuplicate(CommandSender sender, String label, String[] args) {
@@ -522,7 +578,7 @@ public class InfinityPickaxeCommand implements CommandExecutor, TabCompleter {
             List<String> list = new ArrayList<>(gearCommand ? List.of() : Arrays.asList("menu", "gui"));
             if (hasAdmin(sender)) {
                 list.addAll(gearCommand
-                        ? Arrays.asList("give", "book", "artifact", "station", "reload", "setlevel", "addxp", "migration")
+                        ? Arrays.asList("give", "book", "artifact", "station", "reload", "setlevel", "addxp", "migration", "xp")
                         : Arrays.asList("give", "book", "reload", "setlevel", "addxp"));
                 list.add("duplicate");
             }
@@ -537,6 +593,13 @@ public class InfinityPickaxeCommand implements CommandExecutor, TabCompleter {
         }
         if (gearCommand && args.length == 2 && args[0].equalsIgnoreCase("station")) {
             return List.of("runic-table", "fusion-altar", "gear-forge", "bind", "unbind", "status");
+        }
+        if (gearCommand && args.length == 2 && args[0].equalsIgnoreCase("xp")) {
+            return List.of("adopt", "reconcile", "issues");
+        }
+        if (gearCommand && args.length == 3 && args[0].equalsIgnoreCase("xp") && args[1].equalsIgnoreCase("adopt")) {
+            return Bukkit.getOnlinePlayers().stream().map(Player::getName)
+                    .filter(name -> name.toLowerCase().startsWith(args[2].toLowerCase())).toList();
         }
         if (gearCommand && args.length == 3 && args[0].equalsIgnoreCase("station")
                 && args[1].equalsIgnoreCase("bind")) {

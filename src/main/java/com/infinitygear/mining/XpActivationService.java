@@ -1,0 +1,314 @@
+package com.infinitygear.mining;
+
+import com.infinitygear.data.GearData;
+import com.infinitygear.gear.GearProgressionMode;
+import com.infinitygear.integration.IntegrationTasks;
+import com.infinitygear.persistence.MariaMiningXpLedger;
+import com.infinitygear.persistence.MariaMiningXpLedger.AdministrativeAction;
+import com.infinitypickaxes.InfinityPickaxes;
+import com.infinitypickaxes.core.pickaxe.PickaxeData;
+import org.bukkit.Bukkit;
+import org.bukkit.Material;
+import org.bukkit.command.CommandSender;
+import org.bukkit.entity.Item;
+import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
+import org.bukkit.event.Listener;
+import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.inventory.InventoryDragEvent;
+import org.bukkit.event.inventory.InventoryOpenEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.BlockStateMeta;
+import org.bukkit.persistence.PersistentDataType;
+import io.papermc.paper.block.TileStateInventoryHolder;
+
+import java.nio.charset.StandardCharsets;
+import java.util.*;
+import java.util.concurrent.CompletableFuture;
+
+/** Explicit adoption and receipt-only lifecycle recovery. It is not a mining completion receiver. */
+public final class XpActivationService implements Listener {
+    public enum State { ADOPTED, PROJECTED, CURRENT, MISSING, DUPLICATED, QUARANTINED, STALE, CONFLICT, UNADOPTED }
+    public record Report(UUID pickaxeId, State state, String detail) { }
+    private record Located(ItemStack item, Player owner, String location, int copies, boolean quarantined) { }
+    private record AccountState(MariaMiningXpLedger.Adoption adoption, MiningXpPlan.Account account) { }
+
+    private final InfinityPickaxes plugin;
+    private final IntegrationTasks tasks;
+    private final MariaMiningXpLedger ledger;
+    private final MiningXpItemProjection projection = new MiningXpItemProjection();
+
+    public XpActivationService(InfinityPickaxes plugin, IntegrationTasks tasks, MariaMiningXpLedger ledger) {
+        this.plugin = Objects.requireNonNull(plugin);
+        this.tasks = Objects.requireNonNull(tasks);
+        this.ledger = Objects.requireNonNull(ledger);
+    }
+
+    /** The guard marker is written before any asynchronous database work. */
+    public CompletableFuture<Report> adopt(CommandSender actor, Player owner) {
+        if (!Bukkit.isPrimaryThread()) return CompletableFuture.failedFuture(new IllegalStateException("Server thread required"));
+        ItemStack held = owner.getInventory().getItemInMainHand();
+        var gear = plugin.getGearManager().inspect(held, true).orElse(null);
+        var profile = gear == null ? null : plugin.getGearProfiles().find(gear.profileId()).orElse(null);
+        if (gear == null || profile == null || !profile.enabled() || profile.progressionMode() != GearProgressionMode.EXPERIENCE)
+            return CompletableFuture.failedFuture(new IllegalArgumentException("Hold one enabled EXPERIENCE gear item"));
+        Located custody = locate(gear.uuid());
+        if (custody.copies() != 1 || custody.item() != held || custody.owner() != owner)
+            return issue(gear.uuid(), custody.copies() == 0 ? State.MISSING : State.DUPLICATED,
+                    "Adoption requires exactly one visible copy held in the main hand", custody.location());
+        if (custody.quarantined() || plugin.getDuplicateService().isRestricted(gear.uuid()))
+            return issue(gear.uuid(), State.QUARANTINED, "Restricted or quarantined item cannot be adopted", custody.location());
+
+        UUID adoptionId = UUID.randomUUID();
+        MiningXpItemProjection.AdoptionFence fence;
+        try { fence = projection.beginAdoption(held, adoptionId); }
+        catch (RuntimeException failure) { return CompletableFuture.failedFuture(failure); }
+        String actorName = actor.getName();
+        return tasks.database(() -> {
+            try { return ledger.adopt(adoptionId, owner.getUniqueId(), fence.pickaxeId(), fence.profileId(), fence.baseline(), actorName); }
+            catch (Exception failure) {
+                var recovered = ledger.findAdoption(fence.pickaxeId());
+                if (recovered.isPresent() && recovered.get().adoptionId().equals(adoptionId)) return recovered.get();
+                throw failure;
+            }
+        }).thenCompose(adoption -> tasks.server(() -> {
+            Located current = locate(fence.pickaxeId());
+            if (current.copies() != 1 || current.item() != held || current.owner() != owner || current.quarantined())
+                return new Report(fence.pickaxeId(), State.CONFLICT, "Custody changed before first projection");
+            var applied = projection.completeAdoption(held, fence, adoption.account());
+            return new Report(fence.pickaxeId(), applied == MiningXpItemProjection.Result.APPLIED ? State.ADOPTED : State.CONFLICT,
+                    applied == MiningXpItemProjection.Result.APPLIED ? "MariaDB authority established at revision 0" : "First projection conflicted");
+        })).thenCompose(report -> report.state() == State.ADOPTED ? clear(report)
+                : issue(report.pickaxeId(), report.state(), report.detail(), "adoption"))
+                .exceptionallyCompose(failure -> issue(fence.pickaxeId(), State.CONFLICT,
+                        "Durable adoption did not complete; the fail-closed marker was retained", "adoption"));
+    }
+
+    public CompletableFuture<Report> recover(UUID pickaxeId) {
+        return tasks.server(() -> locate(pickaxeId)).thenCompose(located -> recoverLocated(pickaxeId, located));
+    }
+
+    private CompletableFuture<Report> recoverLocated(UUID id, Located located) {
+        if (located.copies() == 0) return issue(id, State.MISSING, "No visible physical item", located.location());
+        if (located.copies() != 1) return issue(id, State.DUPLICATED, "Multiple visible physical copies", located.location());
+        if (located.quarantined() || plugin.getDuplicateService().isRestricted(id))
+            return issue(id, State.QUARANTINED, "Physical item is quarantined or restricted", located.location());
+        return tasks.database(() -> new AccountState(ledger.findAdoption(id).orElse(null), ledger.findAccount(id).orElse(null)))
+                .thenCompose(state -> {
+                    if (state.adoption() == null || state.account() == null)
+                        return issue(id, State.UNADOPTED, "No explicit ledger adoption exists", located.location());
+                    UUID pending = MiningXpItemProjection.adoptionId(located.item());
+                    if (pending != null) {
+                        if (!pending.equals(state.adoption().adoptionId()) || state.account().revision() != 0)
+                            return issue(id, State.CONFLICT, "Pending adoption marker conflicts with durable adoption", located.location());
+                        var fence = new MiningXpItemProjection.AdoptionFence(pending, id, state.account().profileId(), state.account().progress());
+                        return tasks.server(() -> projection.completeAdoption(located.item(), fence, state.account()))
+                                .thenCompose(result -> result == MiningXpItemProjection.Result.APPLIED
+                                        ? clear(new Report(id, State.ADOPTED, "Recovered durable adoption at revision 0"))
+                                        : issue(id, State.CONFLICT, "Pending adoption metadata no longer matches", located.location()));
+                    }
+                    Long revision = MiningXpItemProjection.revision(located.item());
+                    if (revision == null) return issue(id, State.CONFLICT, "Managed revision is missing or malformed", located.location());
+                    if (revision > state.account().revision())
+                        return issue(id, State.STALE, "Item revision is ahead of MariaDB authority", located.location());
+                    if (revision == state.account().revision()) {
+                        if (!MiningXpItemProjection.matchesAccount(located.item(), state.account()))
+                            return issue(id, State.CONFLICT, "Item progress conflicts with its authoritative revision", located.location());
+                        if (revision == 0) return clear(new Report(id, State.CURRENT, "Projection is current at revision 0"));
+                        return tasks.database(() -> ledger.findProjection(id, revision)).thenCompose(last -> {
+                            if (last.isEmpty()) return issue(id, State.CONFLICT,
+                                    "Authoritative revision has no unique committed receipt", located.location());
+                            return present(last.get()).thenCompose(ignored -> clear(new Report(id, State.CURRENT,
+                                    "Projection is current at revision " + revision)));
+                        });
+                    }
+                    return projectNext(id, revision + 1);
+                });
+    }
+
+    private CompletableFuture<Report> projectNext(UUID id, long revision) {
+        return tasks.database(() -> ledger.findProjection(id, revision)).thenCompose(found -> {
+            if (found.isEmpty()) return issue(id, State.CONFLICT, "Committed revision " + revision + " has no unique receipt", "recovery");
+            XpProjectionReceipt receipt = found.get();
+            return tasks.server(() -> {
+                Located current = locate(id);
+                if (current.copies() != 1 || current.quarantined()) return new Report(id,
+                        current.copies() == 0 ? State.MISSING : current.copies() > 1 ? State.DUPLICATED : State.QUARANTINED,
+                        "Custody changed during projection");
+                var result = projection.apply(current.item(), receipt);
+                if (result == MiningXpItemProjection.Result.CONFLICT) return new Report(id, State.CONFLICT,
+                        "Absolute revision " + revision + " conflicts with item metadata");
+                plugin.getGearManager().refreshPresentation(current.item());
+                return new Report(id, State.PROJECTED, current.location());
+            }).thenCompose(result -> {
+                if (result.state() != State.PROJECTED) return issue(id, result.state(), result.detail(), "projection");
+                return present(receipt).thenCompose(ignored -> recover(id));
+            });
+        });
+    }
+
+    public CompletableFuture<Report> addXp(CommandSender actor, Player owner, double amount) {
+        return administer(actor, owner, AdministrativeAction.ADD_XP, amount);
+    }
+    public CompletableFuture<Report> setLevel(CommandSender actor, Player owner, int level) {
+        return administer(actor, owner, AdministrativeAction.SET_LEVEL, level);
+    }
+
+    private CompletableFuture<Report> administer(CommandSender actor, Player owner, AdministrativeAction action, double value) {
+        if (!Bukkit.isPrimaryThread()) return CompletableFuture.failedFuture(new IllegalStateException("Server thread required"));
+        if (!Double.isFinite(value) || value < 0 || (action == AdministrativeAction.ADD_XP && value == 0))
+            return CompletableFuture.failedFuture(new IllegalArgumentException("Administrative value must be positive and finite"));
+        ItemStack held = owner.getInventory().getItemInMainHand();
+        UUID id = itemId(held);
+        Located located = id == null ? new Located(null, null, "main-hand", 0, false) : locate(id);
+        if (id == null || located.copies() != 1 || located.item() != held || located.quarantined()
+                || MiningXpItemProjection.revision(held) == null)
+            return CompletableFuture.failedFuture(new IllegalStateException("Target must uniquely hold one adopted, non-quarantined item"));
+        var gear = plugin.getGearManager().inspect(held, false).orElseThrow();
+        var profile = plugin.getGearProfiles().find(gear.profileId()).orElseThrow();
+        if (profile.progressionMode() != GearProgressionMode.EXPERIENCE)
+            return CompletableFuture.failedFuture(new IllegalArgumentException("Profile does not use EXPERIENCE progression"));
+        List<Double> requirements = new ArrayList<>(profile.maximumLevel());
+        for (int i = 0; i < profile.maximumLevel(); i++) requirements.add(plugin.getLevelManager().getRequiredXp(i));
+        UUID operationId = UUID.randomUUID();
+        UUID actorId = actor instanceof Player player ? player.getUniqueId()
+                : UUID.nameUUIDFromBytes(("console:" + actor.getName()).getBytes(StandardCharsets.UTF_8));
+        return tasks.database(() -> {
+                    var adoption = ledger.findAdoption(id).orElseThrow(() -> new IllegalStateException("XP account has not been explicitly adopted"));
+                    return ledger.findAccount(id).filter(adoption.account()::equals)
+                            .orElseThrow(() -> new IllegalStateException("Adoption/account state conflicts"));
+                }).thenCompose(account -> tasks.server(() -> {
+                    Located current = locate(id);
+                    if (current.copies() != 1 || current.item() != held || current.quarantined()
+                            || !MiningXpItemProjection.matchesAccount(held, account))
+                        throw new IllegalStateException("Item custody or projection changed before administrative commit");
+                    return account;
+                })).thenCompose(account -> tasks.database(() -> ledger.administer(operationId, actorId, actor.getName(), id,
+                        account.profileId(), account.revision(), account.progress(), action, value, requirements)))
+                .thenCompose(receipt -> tasks.server(() -> {
+                    Located current = locate(id);
+                    if (current.copies() != 1 || current.item() != held || current.quarantined())
+                        return new Report(id, State.CONFLICT, "Custody changed after administrative commit");
+                    var result = projection.apply(held, receipt.projection());
+                    if (result == MiningXpItemProjection.Result.CONFLICT)
+                        return new Report(id, State.CONFLICT, "Administrative receipt conflicts with item metadata");
+                    plugin.getGearManager().refreshPresentation(held);
+                    return new Report(id, State.PROJECTED, "Administrative " + action + " committed at revision " + receipt.account().revision());
+                }).thenCompose(report -> report.state() == State.PROJECTED
+                        ? present(receipt.projection()).thenCompose(ignored -> clear(report))
+                        : issue(id, report.state(), report.detail(), "administration")))
+                .exceptionallyCompose(failure -> tasks.database(() -> ledger.findAdministrativeReceipt(operationId))
+                        .thenCompose(saved -> saved.isPresent() ? recover(id) : issue(id, State.CONFLICT,
+                                "Administrative operation has no committed receipt and was not replayed", "administration")));
+    }
+
+    /** Policy: only upward transitions, only while a unique copy has an online owner, at most once per revision. */
+    private CompletableFuture<Void> present(XpProjectionReceipt receipt) {
+        if (receipt.account().progress().level() <= receipt.before().level()) return CompletableFuture.completedFuture(null);
+        return tasks.server(() -> locate(receipt.pickaxeId())).thenCompose(ready -> {
+            if (ready.copies() != 1 || ready.owner() == null || !ready.owner().isOnline())
+                return CompletableFuture.completedFuture(null);
+            UUID ownerId = ready.owner().getUniqueId();
+            return tasks.database(() -> ledger.claimPresentation(receipt.pickaxeId(), receipt.account().revision(), "LEVEL_UP"))
+                    .thenCompose(claimed -> claimed ? tasks.server(() -> {
+                        Located current = locate(receipt.pickaxeId());
+                        if (current.copies() == 1 && current.owner() != null && current.owner().isOnline()
+                                && ownerId.equals(current.owner().getUniqueId()))
+                            plugin.getLevelManager().presentCommittedLevelUp(current.owner(), current.item(),
+                                    receipt.before().level(), receipt.account().progress().level());
+                        return null;
+                    }) : CompletableFuture.completedFuture(null));
+        });
+    }
+
+    private CompletableFuture<Report> issue(UUID id, State state, String detail, String location) {
+        return tasks.database(() -> { ledger.recordReconciliation(id, state.name(), detail, location == null ? "unknown" : location); return null; })
+                .handle((ignored, failure) -> new Report(id, state, detail));
+    }
+    private CompletableFuture<Report> clear(Report report) {
+        return tasks.database(() -> { ledger.clearReconciliation(report.pickaxeId()); return null; }).thenApply(ignored -> report);
+    }
+    public CompletableFuture<List<MariaMiningXpLedger.Reconciliation>> issues() {
+        return tasks.database(() -> ledger.reconciliations(100));
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onJoin(PlayerJoinEvent event) { schedule(event.getPlayer().getInventory(), event.getPlayer().getEnderChest()); }
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onOpen(InventoryOpenEvent event) { schedule(event.getInventory()); }
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onClick(InventoryClickEvent event) {
+        if (event.getWhoClicked() instanceof Player player) schedule(player.getInventory(), event.getView().getTopInventory());
+    }
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onDrag(InventoryDragEvent event) {
+        if (event.getWhoClicked() instanceof Player player) schedule(player.getInventory(), event.getView().getTopInventory());
+    }
+    public void recoverLoadedOnStart() {
+        Bukkit.getScheduler().runTask(plugin, () -> Bukkit.getOnlinePlayers().forEach(player ->
+                scan(player.getInventory(), player.getEnderChest())));
+    }
+    private void schedule(Inventory... inventories) { Bukkit.getScheduler().runTask(plugin, () -> scan(inventories)); }
+    private void scan(Inventory... inventories) {
+        Set<UUID> ids = new LinkedHashSet<>();
+        for (Inventory inventory : inventories) if (inventory != null) for (ItemStack item : inventory.getContents()) {
+            UUID id = itemId(item); if (id != null && MiningXpItemProjection.isManaged(item)) ids.add(id);
+        }
+        ids.forEach(id -> recover(id).exceptionally(failure -> {
+            plugin.getLogger().warning("XP projection recovery failed safely for " + id + " (" + failure.getClass().getSimpleName() + ")");
+            return null;
+        }));
+    }
+
+    private Located locate(UUID id) {
+        if (!Bukkit.isPrimaryThread()) throw new IllegalStateException("Server thread required");
+        List<Located> matches = new ArrayList<>(); Set<ItemStack> seen = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            collect(player.getInventory(), player, "player:" + player.getName(), id, seen, matches);
+            collect(player.getEnderChest(), player, "enderchest:" + player.getName(), id, seen, matches);
+            collect(player.getOpenInventory().getTopInventory(), player, "open:" + player.getName(), id, seen, matches);
+        }
+        for (org.bukkit.World world : Bukkit.getWorlds()) for (Item entity : world.getEntitiesByClass(Item.class)) {
+            collectItem(entity.getItemStack(), null, "drop:" + entity.getUniqueId(), id, seen, matches, 0);
+        }
+        int copies = matches.stream().mapToInt(Located::copies).sum();
+        if (matches.isEmpty()) return new Located(null, null, "not-visible", 0, false);
+        Located first = matches.getFirst();
+        return new Located(first.item(), first.owner(), matches.stream().map(Located::location).distinct().reduce((a,b) -> a + "," + b).orElse(first.location()),
+                copies, matches.stream().anyMatch(Located::quarantined));
+    }
+    private void collect(Inventory inventory, Player owner, String label, UUID id, Set<ItemStack> seen, List<Located> matches) {
+        if (inventory == null) return;
+        ItemStack[] contents = inventory.getContents();
+        for (int slot = 0; slot < contents.length; slot++) {
+            collectItem(contents[slot], owner, label + ":" + slot, id, seen, matches, 0);
+        }
+    }
+    private void collectItem(ItemStack item, Player owner, String location, UUID id,
+                             Set<ItemStack> seen, List<Located> matches, int depth) {
+        if (item == null || !seen.add(item)) return;
+        if (id.equals(itemId(item))) matches.add(observation(item, owner, location));
+        int maximumDepth = Math.max(0, plugin.getConfigManager().getConfig()
+                .getInt("duplicate-protection.container-recursion-depth", 3));
+        if (depth >= maximumDepth || !(item.getItemMeta() instanceof BlockStateMeta blockMeta)
+                || !(blockMeta.getBlockState() instanceof TileStateInventoryHolder holder)) return;
+        ItemStack[] nested = holder.getInventory().getContents();
+        for (int slot = 0; slot < nested.length; slot++) {
+            collectItem(nested[slot], owner, location + "/container:" + slot, id, seen, matches, depth + 1);
+        }
+    }
+    private Located observation(ItemStack item, Player owner, String location) {
+        boolean quarantined = item.hasItemMeta() && (item.getItemMeta().getPersistentDataContainer().has(GearData.KEY_QUARANTINED)
+                || item.getItemMeta().getPersistentDataContainer().has(PickaxeData.KEY_QUARANTINED));
+        return new Located(item, owner, location, Math.max(1, item.getAmount()), quarantined);
+    }
+    private static UUID itemId(ItemStack item) {
+        if (item == null || item.getType() == Material.AIR || !item.hasItemMeta()) return null;
+        String value = item.getItemMeta().getPersistentDataContainer().get(GearData.KEY_UUID, PersistentDataType.STRING);
+        if (value == null) return PickaxeData.getPickaxeUuid(item);
+        try { return UUID.fromString(value); } catch (IllegalArgumentException malformed) { return null; }
+    }
+}

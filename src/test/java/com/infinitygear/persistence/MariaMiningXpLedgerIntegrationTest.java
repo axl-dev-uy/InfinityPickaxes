@@ -50,6 +50,55 @@ class MariaMiningXpLedgerIntegrationTest {
             assertTrue(new MariaMiningJournal(source).pendingNotifications(1000).contains(credit));
         }
     }
+    @Test void explicitAdoptionAndAdministrativeReceiptsAreIdempotentAndOrdered() throws Exception {
+        UUID id = UUID.randomUUID(), adoptionId = UUID.randomUUID(), owner = UUID.randomUUID();
+        var baseline = new Progress(0, 90, 7);
+        var adopted = ledger.adopt(adoptionId, owner, id, "infinitygear:pickaxe", baseline, "operator");
+        assertEquals(0, adopted.account().revision());
+        assertEquals(adopted, ledger.adopt(adoptionId, owner, id, "infinitygear:pickaxe", baseline, "operator"));
+        assertThrows(IllegalArgumentException.class, () -> ledger.adopt(adoptionId, owner, id,
+                "infinitygear:pickaxe", new Progress(0, 91, 7), "operator"));
+
+        UUID add = UUID.randomUUID(), actor = UUID.randomUUID();
+        var first = ledger.administer(add, actor, "operator", id, "infinitygear:pickaxe", 0, baseline,
+                MariaMiningXpLedger.AdministrativeAction.ADD_XP, 20, List.of(100.0, 200.0));
+        assertEquals(new Progress(1, 10, 7), first.account().progress());
+        assertEquals(first, ledger.administer(add, actor, "operator", id, "infinitygear:pickaxe", 0, baseline,
+                MariaMiningXpLedger.AdministrativeAction.ADD_XP, 20, List.of(100.0, 200.0)));
+        assertEquals(first.projection(), ledger.findProjection(id, 1).orElseThrow());
+
+        UUID set = UUID.randomUUID();
+        var second = ledger.administer(set, actor, "operator", id, "infinitygear:pickaxe", 1, first.account().progress(),
+                MariaMiningXpLedger.AdministrativeAction.SET_LEVEL, 2, List.of(100.0, 200.0));
+        assertEquals(new Progress(2, 0, 7), second.account().progress());
+        assertEquals(second.projection(), ledger.findProjection(id, 2).orElseThrow());
+        assertEquals(second.account(), ledger.findAccount(id).orElseThrow());
+    }
+
+    @Test void reconciliationAndPresentationClaimsAreDurableAndDeduplicated() throws Exception {
+        UUID id = UUID.randomUUID();
+        ledger.adopt(UUID.randomUUID(), UUID.randomUUID(), id, "infinitygear:pickaxe", new Progress(0, 0, 0), "operator");
+        ledger.recordReconciliation(id, "MISSING", "not visible", "restart");
+        assertTrue(ledger.reconciliations(100).stream().anyMatch(issue -> issue.pickaxeId().equals(id) && issue.status().equals("MISSING")));
+        assertTrue(ledger.claimPresentation(id, 1, "LEVEL_UP"));
+        assertFalse(ledger.claimPresentation(id, 1, "LEVEL_UP"));
+        ledger.clearReconciliation(id);
+        assertFalse(ledger.reconciliations(100).stream().anyMatch(issue -> issue.pickaxeId().equals(id)));
+    }
+    @Test void migrationEightIsRecordedWithItsOwnedTablesAndIsRerunnable() throws Exception {
+        ledger.migrate();
+        try (var connection = source.getConnection(); var statement = connection.createStatement()) {
+            try (var row = statement.executeQuery("SELECT COUNT(*) FROM infinitygear_schema_migrations WHERE version=8")) {
+                assertTrue(row.next()); assertEquals(1, row.getInt(1));
+            }
+            for (String table : List.of("infinitygear_xp_adoptions", "infinitygear_xp_admin_receipts",
+                    "infinitygear_xp_reconciliation", "infinitygear_xp_presentations")) {
+                try (var row = statement.executeQuery("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='" + table + "'")) {
+                    assertTrue(row.next()); assertEquals(1, row.getInt(1));
+                }
+            }
+        }
+    }
     @Test void staleDifferentCreditAndChangedRetryCannotOverwriteAccount() throws Exception {
         var credit = credit(); var plan = plan(account); var receipt = ledger.apply(credit, plan);
         var other = credit();

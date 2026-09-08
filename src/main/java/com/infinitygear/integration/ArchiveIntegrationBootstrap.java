@@ -20,15 +20,23 @@ public final class ArchiveIntegrationBootstrap implements AutoCloseable {
         if (!config.getBoolean("enabled")) return;
         final MariaBookLedger ledger;
         final MariaMiningJournal miningJournal;
+        final MariaMiningXpLedger xpLedger;
         try {
             var source = new DriverDataSource(config.getString("url"), config.getString("username", ""), config.getString("password", ""));
             ledger = new MariaBookLedger(source);
             miningJournal = new MariaMiningJournal(source);
+            xpLedger = new MariaMiningXpLedger(source);
         } catch (IllegalArgumentException invalid) {
             plugin.getLogger().severe("Archive issuance unavailable: invalid MariaDB bootstrap configuration");
             return;
         }
-        tasks.database(() -> { ledger.migrate(); miningJournal.migrate(); return null; }).thenCompose(ignored -> tasks.server(() -> {
+        tasks.database(() -> { ledger.migrate(); miningJournal.migrate(); xpLedger.migrate(); return null; }).thenCompose(ignored -> tasks.server(() -> {
+                    if (!closed) {
+                        var activation = new com.infinitygear.mining.XpActivationService(plugin, tasks, xpLedger);
+                        plugin.setXpActivation(activation);
+                        plugin.getServer().getPluginManager().registerEvents(activation, plugin);
+                        activation.recoverLoadedOnStart();
+                    }
                     if (!closed) plugin.getServer().getServicesManager().register(com.infinitygear.api.v1.MiningIncidentService.class,
                             new com.infinitygear.mining.MiningIncidentRecorder(tasks, miningJournal,
                                     new com.infinitygear.mining.MiningIncidentAlerts(
