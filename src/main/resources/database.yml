@@ -3,3 +3,9 @@ enabled: false
 url: 'jdbc:mariadb://localhost:3306/noxward?connectTimeout=5000&socketTimeout=10000'
 username: ''
 password: ''
+
+# Bounded receipt-gated credit delivery. Failed/deferred rows remain in the outbox.
+mining-delivery:
+  batch-size: 100
+  interval-ticks: 100
+  acceptance-timeout-millis: 5000

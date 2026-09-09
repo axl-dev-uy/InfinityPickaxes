@@ -1,5 +1,29 @@
 # Archives prerequisite contract, version 1
 
+## Durable credit delivery checkpoint (2026-09-08)
+
+The production `MiningAuthority.Receiver` is registered only after asynchronous
+MariaDB migration. It queues on the server thread, loads the explicit adoption
+and authoritative account off-thread, then rechecks the producer revision and
+the same recursive unique-custody rules used by XP activation before capturing
+an immutable progression plan. Stale account, profile, revision, custody,
+producer/reload, or shutdown state omits the award and records an incident when
+persistence remains available. Producer completions are never retried.
+
+Migration 9 adds `infinitygear_mining_consumer_inbox`, keyed uniquely by
+`credit_id` with the full immutable credit payload. The bounded startup and
+scheduled dispatcher acknowledges the receipt-gated outbox only after the inbox
+transaction commits. Identical replay returns accepted from the existing row;
+conflicting ID reuse rejects. `CreditedBlockEvent` is post-commit observation,
+not durable acknowledgement and not an Archive gameplay reward.
+
+`strict-mining` now becomes true only while the migrated database integration,
+completion receiver, XP participant, dispatcher, durable inbox, receiver service
+registration, and at least one producer-supported path are all live. Producer
+paths remain separately reported. The local fixture approves no path, so strict
+mining remains false pending attended player adoption and ordinary-path physical
+interruption acceptance.
+
 ## Safe XP activation checkpoint (2026-09-08)
 
 Migration 8 adds explicit XP adoptions, administrative receipts, unresolved reconciliation records and deduplicated presentation claims. `/igear xp adopt <player>` requires exactly one visible, uniquely held, unstacked and non-quarantined EXPERIENCE item. It writes a fail-closed adoption marker on the server thread before scheduling database work. A committed adoption interrupted before revision-0 projection is finalized from its durable record on login, inventory load or restart; a marker with no committed adoption remains guarded and operator-visible and is never retried automatically.

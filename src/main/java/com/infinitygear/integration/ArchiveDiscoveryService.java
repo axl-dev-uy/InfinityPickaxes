@@ -66,6 +66,8 @@ public final class ArchiveDiscoveryService implements ArchiveIntegrationService 
         var setblock = producer.get(com.infinitygear.api.v1.MiningAuthority.Path.SETBLOCK);
         var natural = producer.get(com.infinitygear.api.v1.MiningAuthority.Path.BREAK_NATURALLY);
         boolean aoe = blast.supported() && dynamite.supported() && vein.supported();
+        boolean supportedProducer = ordinary.supported() || blast.supported() || dynamite.supported() || vein.supported();
+        boolean strict = supportedProducer && plugin.isStrictMiningDeliveryActive();
         return Map.ofEntries(Map.entry("discovery", new Capability(true, "Poll snapshot revision on the server thread")),
                 Map.entry("book-recovery", new Capability(plugin.getServer().getServicesManager().load(com.infinitygear.api.v1.BookIssuanceService.class) != null,
                         "Saved item recovery requires MariaDB; new issuance also requires provenance authority")),
@@ -73,7 +75,9 @@ public final class ArchiveDiscoveryService implements ArchiveIntegrationService 
                         && plugin.getServer().getServicesManager().load(com.infinitygear.api.v1.BookIssuanceService.ProvenanceAuthority.class) != null,
                         "Requires configured MariaDB journal and issuance authority")),
                 Map.entry("book-lifecycle", new Capability(false, "Requires product policy and inventory participant recovery")),
-                Map.entry("strict-mining", new Capability(false, "Requires an authoritative supported-path producer and a registered durable deduplicating receiver")),
+                Map.entry("strict-mining", new Capability(strict, strict
+                        ? "MariaDB, completion receiver, XP participant, bounded outbox, durable inbox, and a supported producer path are active"
+                        : "Requires MariaDB, completion receiver, XP participant, bounded outbox, durable inbox, and a supported producer path")),
                 Map.entry("mining-setblock", new Capability(setblock.supported(), setblock.evidence())),
                 Map.entry("mining-breakNaturally", new Capability(natural.supported(), natural.evidence())),
                 Map.entry("mining-normal", new Capability(ordinary.supported(), ordinary.evidence())),

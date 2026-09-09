@@ -188,6 +188,7 @@ public class InfinityPickaxes extends JavaPlugin {
      */
     public void reloadPlugin(CommandSender sender) {
         long start = System.currentTimeMillis();
+        if (archiveIntegration != null) archiveIntegration.beginReload();
 
         // 1. Close open CustomGui inventories
         for (Player p : Bukkit.getOnlinePlayers()) {
@@ -226,6 +227,7 @@ public class InfinityPickaxes extends JavaPlugin {
             this.papiHook = new PlaceholderAPIHook(this);
             this.papiHook.register();
         }
+        if (archiveIntegration != null) archiveIntegration.finishReload();
 
         long elapsed = System.currentTimeMillis() - start;
         messageManager.sendMessage(sender, "messages.reload-success");
@@ -316,6 +318,9 @@ public class InfinityPickaxes extends JavaPlugin {
     public MoneyGateway getMoneyGateway() { return moneyGateway; }
     public com.infinitygear.mining.XpActivationService getXpActivation() { return xpActivation; }
     public void setXpActivation(com.infinitygear.mining.XpActivationService service) { this.xpActivation = service; }
+    public boolean isStrictMiningDeliveryActive() {
+        return archiveIntegration != null && archiveIntegration.miningPipelineActive();
+    }
 
     private MoneyGateway createMoneyGateway() {
         if (!getServer().getPluginManager().isPluginEnabled("Vault")) return new UnavailableMoneyGateway();

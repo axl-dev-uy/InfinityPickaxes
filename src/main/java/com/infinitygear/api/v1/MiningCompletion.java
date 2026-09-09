@@ -33,4 +33,7 @@ public record MiningCompletion(UUID completionId, UUID instanceId, UUID operatio
                 && placementMatches && mutationUnchanged && !producerException
                 && placement.equals("NATURAL");
     }
+
+    /** Stable, lossless generation attribution used by the credit ledger. */
+    public String generationLiteral() { return mine + ":" + generationId; }
 }

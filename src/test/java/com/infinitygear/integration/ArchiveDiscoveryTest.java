@@ -72,4 +72,21 @@ class ArchiveDiscoveryTest {
         assertFalse(capabilities.get("mining-aoe").available());
         assertFalse(capabilities.get("strict-mining").available());
     }
+
+    @Test void strictMiningRequiresBothLiveDeliveryAndAtLeastOneSupportedProducerPath() {
+        var plugin = mock(InfinityPickaxes.class);
+        var server = mock(org.bukkit.Server.class);
+        var services = mock(org.bukkit.plugin.ServicesManager.class);
+        when(plugin.getServer()).thenReturn(server); when(server.getServicesManager()).thenReturn(services);
+        when(plugin.isStrictMiningDeliveryActive()).thenReturn(true);
+        var authority = mock(MiningAuthority.class);
+        when(authority.capabilities()).thenReturn(Map.of(MiningAuthority.Path.ORDINARY,
+                new MiningAuthority.Capability(true, "fenced ordinary")));
+        when(services.load(MiningAuthority.class)).thenReturn(authority);
+        var discovery = new ArchiveDiscoveryService(plugin);
+        assertTrue(discovery.capabilities().get("strict-mining").available());
+        when(services.load(MiningAuthority.class)).thenReturn(null);
+        assertFalse(discovery.capabilities().get("strict-mining").available());
+        assertFalse(discovery.capabilities().get("mining-normal").available());
+    }
 }

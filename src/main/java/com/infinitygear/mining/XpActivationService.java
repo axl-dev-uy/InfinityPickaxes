@@ -8,9 +8,7 @@ import com.infinitygear.persistence.MariaMiningXpLedger.AdministrativeAction;
 import com.infinitypickaxes.InfinityPickaxes;
 import com.infinitypickaxes.core.pickaxe.PickaxeData;
 import org.bukkit.Bukkit;
-import org.bukkit.Material;
 import org.bukkit.command.CommandSender;
-import org.bukkit.entity.Item;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -21,9 +19,6 @@ import org.bukkit.event.inventory.InventoryOpenEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.BlockStateMeta;
-import org.bukkit.persistence.PersistentDataType;
-import io.papermc.paper.block.TileStateInventoryHolder;
 
 import java.nio.charset.StandardCharsets;
 import java.util.*;
@@ -33,18 +28,19 @@ import java.util.concurrent.CompletableFuture;
 public final class XpActivationService implements Listener {
     public enum State { ADOPTED, PROJECTED, CURRENT, MISSING, DUPLICATED, QUARANTINED, STALE, CONFLICT, UNADOPTED }
     public record Report(UUID pickaxeId, State state, String detail) { }
-    private record Located(ItemStack item, Player owner, String location, int copies, boolean quarantined) { }
     private record AccountState(MariaMiningXpLedger.Adoption adoption, MiningXpPlan.Account account) { }
 
     private final InfinityPickaxes plugin;
     private final IntegrationTasks tasks;
     private final MariaMiningXpLedger ledger;
     private final MiningXpItemProjection projection = new MiningXpItemProjection();
+    private final XpItemCustody custody;
 
     public XpActivationService(InfinityPickaxes plugin, IntegrationTasks tasks, MariaMiningXpLedger ledger) {
         this.plugin = Objects.requireNonNull(plugin);
         this.tasks = Objects.requireNonNull(tasks);
         this.ledger = Objects.requireNonNull(ledger);
+        this.custody = new XpItemCustody(plugin);
     }
 
     /** The guard marker is written before any asynchronous database work. */
@@ -55,12 +51,12 @@ public final class XpActivationService implements Listener {
         var profile = gear == null ? null : plugin.getGearProfiles().find(gear.profileId()).orElse(null);
         if (gear == null || profile == null || !profile.enabled() || profile.progressionMode() != GearProgressionMode.EXPERIENCE)
             return CompletableFuture.failedFuture(new IllegalArgumentException("Hold one enabled EXPERIENCE gear item"));
-        Located custody = locate(gear.uuid());
-        if (custody.copies() != 1 || custody.item() != held || custody.owner() != owner)
-            return issue(gear.uuid(), custody.copies() == 0 ? State.MISSING : State.DUPLICATED,
-                    "Adoption requires exactly one visible copy held in the main hand", custody.location());
-        if (custody.quarantined() || plugin.getDuplicateService().isRestricted(gear.uuid()))
-            return issue(gear.uuid(), State.QUARANTINED, "Restricted or quarantined item cannot be adopted", custody.location());
+        XpItemCustody.Located located = custody.locate(gear.uuid());
+        if (!located.uniqueMainHand(owner, gear.uuid()))
+            return issue(gear.uuid(), located.copies() == 0 ? State.MISSING : State.DUPLICATED,
+                    "Adoption requires exactly one visible copy held in the main hand", located.location());
+        if (located.quarantined() || plugin.getDuplicateService().isRestricted(gear.uuid()))
+            return issue(gear.uuid(), State.QUARANTINED, "Restricted or quarantined item cannot be adopted", located.location());
 
         UUID adoptionId = UUID.randomUUID();
         MiningXpItemProjection.AdoptionFence fence;
@@ -75,10 +71,11 @@ public final class XpActivationService implements Listener {
                 throw failure;
             }
         }).thenCompose(adoption -> tasks.server(() -> {
-            Located current = locate(fence.pickaxeId());
-            if (current.copies() != 1 || current.item() != held || current.owner() != owner || current.quarantined())
+            XpItemCustody.Located current = custody.locate(fence.pickaxeId());
+            if (!current.uniqueMainHand(owner, fence.pickaxeId()) || current.quarantined())
                 return new Report(fence.pickaxeId(), State.CONFLICT, "Custody changed before first projection");
-            var applied = projection.completeAdoption(held, fence, adoption.account());
+            ItemStack currentHeld = owner.getInventory().getItemInMainHand();
+            var applied = projection.completeAdoption(currentHeld, fence, adoption.account());
             return new Report(fence.pickaxeId(), applied == MiningXpItemProjection.Result.APPLIED ? State.ADOPTED : State.CONFLICT,
                     applied == MiningXpItemProjection.Result.APPLIED ? "MariaDB authority established at revision 0" : "First projection conflicted");
         })).thenCompose(report -> report.state() == State.ADOPTED ? clear(report)
@@ -88,10 +85,10 @@ public final class XpActivationService implements Listener {
     }
 
     public CompletableFuture<Report> recover(UUID pickaxeId) {
-        return tasks.server(() -> locate(pickaxeId)).thenCompose(located -> recoverLocated(pickaxeId, located));
+        return tasks.server(() -> custody.locate(pickaxeId)).thenCompose(located -> recoverLocated(pickaxeId, located));
     }
 
-    private CompletableFuture<Report> recoverLocated(UUID id, Located located) {
+    private CompletableFuture<Report> recoverLocated(UUID id, XpItemCustody.Located located) {
         if (located.copies() == 0) return issue(id, State.MISSING, "No visible physical item", located.location());
         if (located.copies() != 1) return issue(id, State.DUPLICATED, "Multiple visible physical copies", located.location());
         if (located.quarantined() || plugin.getDuplicateService().isRestricted(id))
@@ -134,7 +131,7 @@ public final class XpActivationService implements Listener {
             if (found.isEmpty()) return issue(id, State.CONFLICT, "Committed revision " + revision + " has no unique receipt", "recovery");
             XpProjectionReceipt receipt = found.get();
             return tasks.server(() -> {
-                Located current = locate(id);
+                XpItemCustody.Located current = custody.locate(id);
                 if (current.copies() != 1 || current.quarantined()) return new Report(id,
                         current.copies() == 0 ? State.MISSING : current.copies() > 1 ? State.DUPLICATED : State.QUARANTINED,
                         "Custody changed during projection");
@@ -162,9 +159,9 @@ public final class XpActivationService implements Listener {
         if (!Double.isFinite(value) || value < 0 || (action == AdministrativeAction.ADD_XP && value == 0))
             return CompletableFuture.failedFuture(new IllegalArgumentException("Administrative value must be positive and finite"));
         ItemStack held = owner.getInventory().getItemInMainHand();
-        UUID id = itemId(held);
-        Located located = id == null ? new Located(null, null, "main-hand", 0, false) : locate(id);
-        if (id == null || located.copies() != 1 || located.item() != held || located.quarantined()
+        UUID id = XpItemCustody.itemId(held);
+        XpItemCustody.Located located = id == null ? new XpItemCustody.Located(null, null, "main-hand", 0, false) : custody.locate(id);
+        if (id == null || !located.uniqueMainHand(owner, id) || located.quarantined()
                 || MiningXpItemProjection.revision(held) == null)
             return CompletableFuture.failedFuture(new IllegalStateException("Target must uniquely hold one adopted, non-quarantined item"));
         var gear = plugin.getGearManager().inspect(held, false).orElseThrow();
@@ -181,21 +178,23 @@ public final class XpActivationService implements Listener {
                     return ledger.findAccount(id).filter(adoption.account()::equals)
                             .orElseThrow(() -> new IllegalStateException("Adoption/account state conflicts"));
                 }).thenCompose(account -> tasks.server(() -> {
-                    Located current = locate(id);
-                    if (current.copies() != 1 || current.item() != held || current.quarantined()
-                            || !MiningXpItemProjection.matchesAccount(held, account))
+                    XpItemCustody.Located current = custody.locate(id);
+                    ItemStack currentHeld = owner.getInventory().getItemInMainHand();
+                    if (!current.uniqueMainHand(owner, id) || current.quarantined()
+                            || !MiningXpItemProjection.matchesAccount(currentHeld, account))
                         throw new IllegalStateException("Item custody or projection changed before administrative commit");
                     return account;
                 })).thenCompose(account -> tasks.database(() -> ledger.administer(operationId, actorId, actor.getName(), id,
                         account.profileId(), account.revision(), account.progress(), action, value, requirements)))
                 .thenCompose(receipt -> tasks.server(() -> {
-                    Located current = locate(id);
-                    if (current.copies() != 1 || current.item() != held || current.quarantined())
+                    XpItemCustody.Located current = custody.locate(id);
+                    if (!current.uniqueMainHand(owner, id) || current.quarantined())
                         return new Report(id, State.CONFLICT, "Custody changed after administrative commit");
-                    var result = projection.apply(held, receipt.projection());
+                    ItemStack currentHeld = owner.getInventory().getItemInMainHand();
+                    var result = projection.apply(currentHeld, receipt.projection());
                     if (result == MiningXpItemProjection.Result.CONFLICT)
                         return new Report(id, State.CONFLICT, "Administrative receipt conflicts with item metadata");
-                    plugin.getGearManager().refreshPresentation(held);
+                    plugin.getGearManager().refreshPresentation(currentHeld);
                     return new Report(id, State.PROJECTED, "Administrative " + action + " committed at revision " + receipt.account().revision());
                 }).thenCompose(report -> report.state() == State.PROJECTED
                         ? present(receipt.projection()).thenCompose(ignored -> clear(report))
@@ -208,13 +207,13 @@ public final class XpActivationService implements Listener {
     /** Policy: only upward transitions, only while a unique copy has an online owner, at most once per revision. */
     private CompletableFuture<Void> present(XpProjectionReceipt receipt) {
         if (receipt.account().progress().level() <= receipt.before().level()) return CompletableFuture.completedFuture(null);
-        return tasks.server(() -> locate(receipt.pickaxeId())).thenCompose(ready -> {
+        return tasks.server(() -> custody.locate(receipt.pickaxeId())).thenCompose(ready -> {
             if (ready.copies() != 1 || ready.owner() == null || !ready.owner().isOnline())
                 return CompletableFuture.completedFuture(null);
             UUID ownerId = ready.owner().getUniqueId();
             return tasks.database(() -> ledger.claimPresentation(receipt.pickaxeId(), receipt.account().revision(), "LEVEL_UP"))
                     .thenCompose(claimed -> claimed ? tasks.server(() -> {
-                        Located current = locate(receipt.pickaxeId());
+                        XpItemCustody.Located current = custody.locate(receipt.pickaxeId());
                         if (current.copies() == 1 && current.owner() != null && current.owner().isOnline()
                                 && ownerId.equals(current.owner().getUniqueId()))
                             plugin.getLevelManager().presentCommittedLevelUp(current.owner(), current.item(),
@@ -255,7 +254,7 @@ public final class XpActivationService implements Listener {
     private void scan(Inventory... inventories) {
         Set<UUID> ids = new LinkedHashSet<>();
         for (Inventory inventory : inventories) if (inventory != null) for (ItemStack item : inventory.getContents()) {
-            UUID id = itemId(item); if (id != null && MiningXpItemProjection.isManaged(item)) ids.add(id);
+            UUID id = XpItemCustody.itemId(item); if (id != null && MiningXpItemProjection.isManaged(item)) ids.add(id);
         }
         ids.forEach(id -> recover(id).exceptionally(failure -> {
             plugin.getLogger().warning("XP projection recovery failed safely for " + id + " (" + failure.getClass().getSimpleName() + ")");
@@ -263,52 +262,4 @@ public final class XpActivationService implements Listener {
         }));
     }
 
-    private Located locate(UUID id) {
-        if (!Bukkit.isPrimaryThread()) throw new IllegalStateException("Server thread required");
-        List<Located> matches = new ArrayList<>(); Set<ItemStack> seen = Collections.newSetFromMap(new IdentityHashMap<>());
-        for (Player player : Bukkit.getOnlinePlayers()) {
-            collect(player.getInventory(), player, "player:" + player.getName(), id, seen, matches);
-            collect(player.getEnderChest(), player, "enderchest:" + player.getName(), id, seen, matches);
-            collect(player.getOpenInventory().getTopInventory(), player, "open:" + player.getName(), id, seen, matches);
-        }
-        for (org.bukkit.World world : Bukkit.getWorlds()) for (Item entity : world.getEntitiesByClass(Item.class)) {
-            collectItem(entity.getItemStack(), null, "drop:" + entity.getUniqueId(), id, seen, matches, 0);
-        }
-        int copies = matches.stream().mapToInt(Located::copies).sum();
-        if (matches.isEmpty()) return new Located(null, null, "not-visible", 0, false);
-        Located first = matches.getFirst();
-        return new Located(first.item(), first.owner(), matches.stream().map(Located::location).distinct().reduce((a,b) -> a + "," + b).orElse(first.location()),
-                copies, matches.stream().anyMatch(Located::quarantined));
-    }
-    private void collect(Inventory inventory, Player owner, String label, UUID id, Set<ItemStack> seen, List<Located> matches) {
-        if (inventory == null) return;
-        ItemStack[] contents = inventory.getContents();
-        for (int slot = 0; slot < contents.length; slot++) {
-            collectItem(contents[slot], owner, label + ":" + slot, id, seen, matches, 0);
-        }
-    }
-    private void collectItem(ItemStack item, Player owner, String location, UUID id,
-                             Set<ItemStack> seen, List<Located> matches, int depth) {
-        if (item == null || !seen.add(item)) return;
-        if (id.equals(itemId(item))) matches.add(observation(item, owner, location));
-        int maximumDepth = Math.max(0, plugin.getConfigManager().getConfig()
-                .getInt("duplicate-protection.container-recursion-depth", 3));
-        if (depth >= maximumDepth || !(item.getItemMeta() instanceof BlockStateMeta blockMeta)
-                || !(blockMeta.getBlockState() instanceof TileStateInventoryHolder holder)) return;
-        ItemStack[] nested = holder.getInventory().getContents();
-        for (int slot = 0; slot < nested.length; slot++) {
-            collectItem(nested[slot], owner, location + "/container:" + slot, id, seen, matches, depth + 1);
-        }
-    }
-    private Located observation(ItemStack item, Player owner, String location) {
-        boolean quarantined = item.hasItemMeta() && (item.getItemMeta().getPersistentDataContainer().has(GearData.KEY_QUARANTINED)
-                || item.getItemMeta().getPersistentDataContainer().has(PickaxeData.KEY_QUARANTINED));
-        return new Located(item, owner, location, Math.max(1, item.getAmount()), quarantined);
-    }
-    private static UUID itemId(ItemStack item) {
-        if (item == null || item.getType() == Material.AIR || !item.hasItemMeta()) return null;
-        String value = item.getItemMeta().getPersistentDataContainer().get(GearData.KEY_UUID, PersistentDataType.STRING);
-        if (value == null) return PickaxeData.getPickaxeUuid(item);
-        try { return UUID.fromString(value); } catch (IllegalArgumentException malformed) { return null; }
-    }
 }
