@@ -34,7 +34,8 @@ class ArchiveContractsTest {
     @Test void dtoSignaturesDoNotExposeImplementationPackages() {
         for (Class<?> type : List.of(ArchiveIntegrationService.class, BookLedger.class, BookIssuanceService.class,
                 MiningAuthority.class, MiningCompletion.class, MiningCredit.class,
-                ProvenancePolicy.class, ProvenanceTransition.class)) check(type);
+                ProvenancePolicy.class, ProvenanceTransition.class,
+                BookLifecycleRequest.class, BookLifecycleTransaction.class)) check(type);
     }
     @Test void miningCompletionRequiresEveryConfirmedPhysicalFact() {
         var completion = new MiningCompletion(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),

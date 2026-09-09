@@ -1,5 +1,16 @@
 # Archives prerequisite contract, version 1
 
+## Task #5 contract slice 1 (2026-09-09)
+
+The implementation-free lifecycle DTOs, canonical fingerprint and durable phase
+contract are now implemented and documented in
+[`book-lifecycle-contract.md`](book-lifecycle-contract.md). This slice adds no
+MariaDB lifecycle migration, Bukkit inventory participant, route wiring, policy
+authorization or capability. `book-lifecycle` remains false and
+`ProvenancePolicy.unresolved()` remains the production default. Continue with
+the attachment/journal-only slice described in that document before building a
+physical participant.
+
 ## Task #4 closure update (2026-09-09)
 
 The dated mining checkpoints below are retained as implementation history. Their
