@@ -1,5 +1,33 @@
 # Archives prerequisite contract, version 1
 
+## Task #4 closure update (2026-09-09)
+
+The dated mining checkpoints below are retained as implementation history. Their
+statements that the production receiver, durable consumer, migration-8 Paper
+acceptance, ordinary producer evidence, physical-return interruption, placement,
+reset, multiplayer or staff-alert gates remain open are superseded by the
+attended Task #3/#4 evidence in
+`/home/axl/Dev/NoxwardArchive/docs/live-mining-acceptance.md`.
+
+For one exact approved Paper 26.2 artifact/config/listener fingerprint, ordinary
+mining now has bounded live acceptance from one physical instance through XP
+receipt, credit, durable inbox and acknowledgement. The fixture finished at
+revision 5 / XP 9 / five blocks with exact 5/5/5/5 durable totals. Source and
+fixture defaults remain disabled and unapproved. AxMines now also requires the
+receiver service to be present on every capability query; service disappearance
+immediately removes ordinary support. The updated AxMines suite passes 65/65.
+InfinityGear's production implementation and installed artifact remain based on
+`16ae526`; its installed jar SHA-256 is
+`98d6d78514ad542bd2ada43718687e9282592700ea0c1d9d8e255dbaa9e94973`.
+
+Managed Blast/Dynamite/Vein, piston provenance, identical-material replacement,
+`setblock` and `breakNaturally` remain unsupported. No Archive gameplay reward
+was added. The next canonical surface is live book lifecycle: equipment
+attachment lineage plus crash-recoverable application, replacement, removal,
+transfer and fusion inventory participants. `book-lifecycle` remains false and
+`ProvenancePolicy.unresolved()` continues rejecting every unresolved product
+case. See `/home/axl/Dev/NoxwardArchive/docs/integration-handoff.md` for Task #5.
+
 ## Durable credit delivery checkpoint (2026-09-08)
 
 The production `MiningAuthority.Receiver` is registered only after asynchronous
