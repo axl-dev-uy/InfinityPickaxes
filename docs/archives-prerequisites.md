@@ -1,15 +1,50 @@
 # Archives prerequisite contract, version 1
 
+## Task #5 journal slice 2 (2026-09-10)
+
+Migration 10 and the blocking `MariaBookLifecycleTransaction` now implement the
+database-only lifecycle/attachment participant described by the contract slice.
+The migration persists the complete canonical request and normalized equipment,
+input, output-reservation and lineage records, including exact before/after item
+images, attachment revision, phase, policy decision, exact values and timestamps.
+
+Lifecycle operation IDs are claimed in the existing
+`infinitygear_book_operations` namespace, so issuance and the older transition
+ledger reject reuse in either direction. Preparation locks and validates exact
+unconsumed source identities/artifacts, values, output freshness and equipment
+attachment revision without retiring sources or modifying attachment lineage.
+Finalization repeats those locks and atomically retires tracked sources, writes
+the predeclared fresh book identities and canonical artifacts, replaces or clears
+enchantment-keyed attachment lineage, and advances the separate attachment
+revision exactly once.
+
+The journal recovers the same immutable request after repository recreation,
+rejects conflicting payloads, applies monotonic fingerprint-bound phase CAS, and
+persists the immediately preceding phase so only the identical committed CAS can
+be replayed. A different expected phase cannot recover merely because it names
+the same destination. The journal verifies unchanged durable before-state before
+recording `ABORTED` or `ROLLED_BACK`. A bounded retry handles MariaDB deadlocks
+only during pre-mutation
+preparation. An injected failure immediately before commit proves source,
+artifact, attachment, revision and phase writes roll back together.
+
+Java 25 `test assemble` passed **326 tests, zero skipped** against a dedicated
+disposable MariaDB schema, including 38 environment-gated MariaDB tests and eight
+new lifecycle tests. The migration was rerun and recovery used fresh repository
+instances. No physical inventory participant or lifecycle service is registered;
+`book-lifecycle` remains false and `ProvenancePolicy.unresolved()` remains the
+production default.
+
 ## Task #5 contract slice 1 (2026-09-09)
 
 The implementation-free lifecycle DTOs, canonical fingerprint and durable phase
-contract are now implemented and documented in
+contract were implemented and documented in
 [`book-lifecycle-contract.md`](book-lifecycle-contract.md). This slice adds no
 MariaDB lifecycle migration, Bukkit inventory participant, route wiring, policy
 authorization or capability. `book-lifecycle` remains false and
-`ProvenancePolicy.unresolved()` remains the production default. Continue with
-the attachment/journal-only slice described in that document before building a
-physical participant.
+`ProvenancePolicy.unresolved()` remains the production default. The journal work
+requested here is now fulfilled by slice 2 above; continue with the separately
+bounded physical participant described at the end of that document.
 
 ## Task #4 closure update (2026-09-09)
 

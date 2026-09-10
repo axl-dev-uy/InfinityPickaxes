@@ -1,13 +1,55 @@
-# Archive book lifecycle contract — slice 1
+# Archive book lifecycle contract — slices 1 and 2
 
-Status date: 2026-09-09. This is the first bounded implementation slice of
-canonical surface #5. It defines the public transaction vocabulary and recovery
-state machine only. It does not persist lifecycle operations, mutate Bukkit
-inventories, register a lifecycle service, select a product provenance policy,
-or make any lifecycle capability available.
+Status date: 2026-09-10. Slice 1 defined the public transaction vocabulary and
+recovery state machine. Slice 2 implements its MariaDB journal and attachment
+repository. Neither slice mutates Bukkit inventories, registers a lifecycle
+service, selects a product provenance policy, or makes a lifecycle capability
+available.
 
 The current source point before this slice was `c77289c`; production behavior
 and the installed fixture artifact remain based on `16ae526`.
+
+## Journal/attachment implementation — slice 2
+
+Migration 10 now adds the journal-only implementation without changing the
+public contract or exposing a live capability. `MariaBookLifecycleTransaction`
+stores the canonical recoverable request plus normalized operation, physical
+participant, equipment before/after image, output reservation and exact lineage
+rows. Equipment attachment revision is independent of mining XP revision, and
+attachment records are keyed by equipment identity plus enchantment key.
+
+The migration owns six lifecycle tables: equipment attachment revisions,
+enchantment-keyed attachments, operations, physical participants, reserved
+outputs and exact source/destination lineage (the last four share the lifecycle
+operation identity). The operation row retains the canonical request in a
+private versioned binary encoding as well as normalized audit fields. Its
+current phase, immediately preceding phase, preparation time and update time are
+durable, which lets replay distinguish the identical committed CAS from a
+different transition that merely names the same destination phase.
+
+Preparation shares the `infinitygear_book_operations` operation-ID namespace
+with issuance and the older transition ledger. It locks and validates source
+book records/artifacts and the attachment revision/lineage while leaving source
+consumption and attachments unchanged. Finalization revalidates those authorities
+and atomically retires tracked sources, writes the already-declared fresh books
+and canonical artifacts, applies/replaces/clears the attachment, and performs
+one revision compare-and-set. Ordinary physical books remain participant records
+only and never become lineage sources.
+
+Phase advancement is fingerprint-bound and monotonic. Identical replay recovers
+the stored state, conflicting operation reuse and stale revisions reject, and
+applicable physical phases cannot be skipped. `ABORTED` remains preparation-only.
+Post-custody `ROLLED_BACK` is recorded only while the journal can positively
+verify that all durable source, output, attachment and revision authorities still
+match their saved before-state; the future Bukkit participant remains responsible
+for positively comparing/restoring the stored physical before-images first.
+
+Java 25 `test assemble` passed 326 tests with zero skipped against a dedicated
+disposable MariaDB schema. Eight new integration cases cover migration reruns,
+complete request recovery, exact decimal attachment/output values, concurrent
+identical/conflicting preparation, operation namespace collisions, phase CAS,
+stale attachment revisions, finalization replay and injected pre-commit rollback.
+No lifecycle service is registered and `book-lifecycle` remains false.
 
 ## Public contract
 
@@ -99,7 +141,7 @@ unresolved transitions before durable or physical mutation. A test policy
 reference in a request is mechanics evidence only and must never activate a
 capability.
 
-## Verification
+## Contract verification history
 
 `BookLifecycleContractsTest` covers canonical fingerprints, operation-ID
 conflicts, all six operation shapes, exact revision advancement, defensive
@@ -107,32 +149,40 @@ copies, exact decimal conservation/disposition, ordinary-source isolation and
 the recovery phase graph. `ArchiveContractsTest` verifies the new contract does
 not expose implementation packages.
 
-The Java 25 offline `test assemble` run discovered 318 tests: 288 executed and
-passed, while 30 environment-gated MariaDB tests skipped because the disposable
-database was intentionally stopped. Both the API and provider jars assembled,
-and the API jar contains the lifecycle contract classes.
+The slice-1 Java 25 offline `test assemble` run discovered 318 tests: 288
+executed and passed, while 30 environment-gated MariaDB tests skipped because
+the disposable database was intentionally stopped. The slice-2 run superseding
+that checkpoint passed all 326 tests with zero skips against disposable MariaDB.
+Both the API and provider jars assembled; only the implementation-independent
+contract classes are present in the API jar.
 
 ## Next bounded slice
 
-Implement a MariaDB lifecycle journal and attachment repository without Bukkit
-routing:
+Implement the server-thread physical lifecycle participant while retaining the
+journal as the only recovery authority:
 
-1. Add restart-safe numbered migrations for equipment attachment revisions,
-   enchantment-keyed attachments, lifecycle operations, physical participants
-   and operation output/lineage records.
-2. Make preparation atomically validate the full fingerprint, source book
-   records, attachment revision and exact policy decision without retiring a
-   source or changing an attachment.
-3. Make finalization atomically retire consumed book identities, create the
-   already-declared output identities/artifacts, apply/replace/clear attachment
-   lineage and advance the equipment attachment revision once.
-4. Add operation-scoped phase compare-and-set, identical replay and conflicting
-   operation-ID behavior. No broad recovery scan or timed inference.
-5. Cover migration reruns, concurrent duplicate/conflicting submissions,
-   revision fencing, exact totals, rollback and fresh-repository replay against
-   disposable MariaDB.
+1. Capture exact player inventory/equipment locations, UUIDs, stack amounts,
+   quarantine state, attachment revision and serialized before/after images on
+   the server thread; perform no Bukkit access on a database worker.
+2. Persist `PREPARED` off-thread, return to the server thread, re-resolve unique
+   custody recursively and compare every participant before marking custody or
+   mutating anything.
+3. Apply each physical boundary exactly once and advance its matching phase only
+   after positive observation: source removal, equipment after-image, then all
+   output insertions. Absence is never evidence.
+4. Recover only by an explicit operation ID and stored request. For a failure
+   after custody, restore and positively compare every recorded before-image and
+   clear custody before requesting `ROLLED_BACK`; use `ABORTED` only before the
+   first physical mutation.
+5. Route the mechanically unambiguous tracked application case first. Preserve
+   ordinary-book behavior and keep tracked books rejected by every legacy path.
+   Replacement, removal, transfer, pair fusion and bulk fusion remain unavailable
+   unless both their physical adapter and an explicit authorized policy exist.
+6. Fence reload, disconnect, death, close, full inventory, item movement,
+   duplicates, malformed/quarantined items, worker completion after shutdown and
+   every persisted interruption phase. Add disposable Paper/MariaDB acceptance.
 
-Do not register the journal as a live physical participant in that slice.
-`book-lifecycle` and every future per-operation capability remain false until a
-server-thread physical participant and its recovery behavior are separately
-implemented and accepted.
+Do not infer a production provenance decision from the test policy references
+used by journal tests. Register no aggregate lifecycle capability until at least
+one routed operation has accepted physical recovery evidence; report only the
+operation-specific paths actually proven.

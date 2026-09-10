@@ -36,12 +36,14 @@ public final class ArchiveIntegrationBootstrap implements AutoCloseable {
         final MariaMiningJournal miningJournal;
         final MariaMiningXpLedger xpLedger;
         final MariaMiningCreditInbox inbox;
+        final MariaBookLifecycleTransaction bookLifecycle;
         try {
             var source = new DriverDataSource(config.getString("url"), config.getString("username", ""), config.getString("password", ""));
             ledger = new MariaBookLedger(source);
             miningJournal = new MariaMiningJournal(source);
             xpLedger = new MariaMiningXpLedger(source);
             inbox = new MariaMiningCreditInbox(source);
+            bookLifecycle = new MariaBookLifecycleTransaction(source);
         } catch (IllegalArgumentException invalid) {
             plugin.getLogger().severe("Archive integration unavailable: invalid MariaDB bootstrap configuration");
             return;
@@ -50,7 +52,7 @@ public final class ArchiveIntegrationBootstrap implements AutoCloseable {
         long interval = Math.max(1, config.getLong("mining-delivery.interval-ticks", 100));
         long timeout = Math.max(1, config.getLong("mining-delivery.acceptance-timeout-millis", 5000));
         tasks.database(() -> {
-            ledger.migrate(); miningJournal.migrate(); xpLedger.migrate(); inbox.migrate(); return null;
+            ledger.migrate(); miningJournal.migrate(); xpLedger.migrate(); inbox.migrate(); bookLifecycle.migrate(); return null;
         }).thenCompose(ignored -> tasks.server(() -> {
             if (closed) return null;
             var activation = new XpActivationService(plugin, tasks, xpLedger);
