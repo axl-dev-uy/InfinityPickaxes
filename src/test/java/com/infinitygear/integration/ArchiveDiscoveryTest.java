@@ -89,4 +89,24 @@ class ArchiveDiscoveryTest {
         assertFalse(discovery.capabilities().get("strict-mining").available());
         assertFalse(discovery.capabilities().get("mining-normal").available());
     }
+
+    @Test void reportsOnlyOperationSpecificBookApplicationWithoutOverclaimingLifecycle() {
+        var plugin = mock(InfinityPickaxes.class);
+        var server = mock(org.bukkit.Server.class);
+        var services = mock(org.bukkit.plugin.ServicesManager.class);
+        when(plugin.getServer()).thenReturn(server); when(server.getServicesManager()).thenReturn(services);
+        var application = mock(com.infinitygear.api.v1.BookApplicationService.class);
+        when(application.available()).thenReturn(true);
+        when(services.load(com.infinitygear.api.v1.BookApplicationService.class)).thenReturn(application);
+        when(services.load(com.infinitygear.api.v1.BookApplicationService.PolicyAuthority.class))
+                .thenReturn(mock(com.infinitygear.api.v1.BookApplicationService.PolicyAuthority.class));
+        var capabilities = new ArchiveDiscoveryService(plugin).capabilities();
+        assertTrue(capabilities.get("book-application").available());
+        assertFalse(capabilities.get("book-lifecycle").available());
+        when(application.available()).thenReturn(false);
+        assertFalse(new ArchiveDiscoveryService(plugin).capabilities().get("book-application").available());
+        when(application.available()).thenReturn(true);
+        when(services.load(com.infinitygear.api.v1.BookApplicationService.PolicyAuthority.class)).thenReturn(null);
+        assertFalse(new ArchiveDiscoveryService(plugin).capabilities().get("book-application").available());
+    }
 }

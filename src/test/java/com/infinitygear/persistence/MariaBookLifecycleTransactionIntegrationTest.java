@@ -59,6 +59,9 @@ class MariaBookLifecycleTransactionIntegrationTest {
 
         try (var connection = source.getConnection()) {
             assertEquals(1, count(connection, "SELECT COUNT(*) FROM infinitygear_schema_migrations WHERE version=10"));
+            assertEquals(1, count(connection, "SELECT COUNT(*) FROM infinitygear_schema_migrations WHERE version=11"));
+            assertEquals(2, count(connection, "SELECT COUNT(*) FROM infinitygear_book_lifecycle_claims WHERE operation_id='"
+                    + request.operationId() + "'"));
             assertEquals(2, count(connection, "SELECT COUNT(*) FROM infinitygear_book_lifecycle_participants WHERE operation_id='"
                     + request.operationId() + "'"));
             assertEquals(2, count(connection, "SELECT COUNT(*) FROM infinitygear_book_lifecycle_lineage WHERE operation_id='"
@@ -96,6 +99,26 @@ class MariaBookLifecycleTransactionIntegrationTest {
         assertEquals(finalized, replay);
         assertEquals(Optional.of(1L), lifecycle.equipmentRevision(attachment.equipmentId()));
         assertEquals(ACKNOWLEDGED, advance(request, FINALIZED, ACKNOWLEDGED).phase());
+        try (var connection = source.getConnection()) {
+            assertEquals(0, count(connection, "SELECT COUNT(*) FROM infinitygear_book_lifecycle_claims WHERE operation_id='"
+                    + request.operationId() + "'"));
+        }
+    }
+
+    @Test
+    void activePhysicalClaimsRejectCompetingOperationsAndReleaseOnlyAtSafeTerminalState() throws Exception {
+        var sourceBook = sourceBook("0.75", 54);
+        UUID actor = UUID.randomUUID(), equipment = UUID.randomUUID();
+        var first = application(UUID.randomUUID(), actor, equipment, 0, sourceBook, 54, 55, "0.75");
+        var competing = application(UUID.randomUUID(), actor, equipment, 0, sourceBook, 54, 56, "0.75");
+
+        lifecycle.prepare(first);
+        assertThrows(IllegalStateException.class, () -> lifecycle.prepare(competing));
+        assertTrue(lifecycle.find(competing.operationId()).isEmpty());
+        advance(first, PREPARED, CUSTODY_MARKED);
+        advance(first, CUSTODY_MARKED, ROLLED_BACK);
+
+        assertEquals(PREPARED, lifecycle.prepare(competing).phase());
     }
 
     @Test

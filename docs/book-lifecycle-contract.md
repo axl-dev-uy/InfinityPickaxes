@@ -6,8 +6,26 @@ repository. Neither slice mutates Bukkit inventories, registers a lifecycle
 service, selects a product provenance policy, or makes a lifecycle capability
 available.
 
-The current source point before this slice was `c77289c`; production behavior
-and the installed fixture artifact remain based on `16ae526`.
+## Task #6 source checkpoint
+
+The Task #6 continuation adds the first operation-specific physical
+participant for tracked, no-replacement application. `BookApplicationService`
+requires a separate production `PolicyAuthority`, retains server-thread Bukkit
+access and worker-thread JDBC, uses operation-scoped PDC custody plus a
+source-slot escrow token, and recovers only by durable operation ID. Migration
+11 serializes active equipment/source claims and releases them only with a safe
+terminal database transition. Durable attachment revision/value/operation are
+rechecked before custody cleanup and acknowledgement.
+
+`book-application` is reported separately only when both participant and policy
+are live. Aggregate `book-lifecycle` remains false; legacy tracked-book routes,
+replacement, removal, transfer and fusion remain unavailable. Java 25 `test
+assemble` passed 332 tests with zero skips against disposable MariaDB. No live
+Paper interruption/serialization acceptance, installed artifact change or
+production policy is claimed, so Task #6 remains open.
+
+The source point before this slice was `f006754`; production behavior and the
+installed fixture artifact remain based on `16ae526`.
 
 ## Journal/attachment implementation — slice 2
 

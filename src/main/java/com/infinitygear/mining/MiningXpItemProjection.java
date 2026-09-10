@@ -44,7 +44,8 @@ public final class MiningXpItemProjection {
     public AdoptionFence beginAdoption(ItemStack item, UUID adoptionId) {
         if (!Bukkit.isPrimaryThread()) throw new IllegalStateException("Server thread required");
         Objects.requireNonNull(adoptionId);
-        if (item == null || item.getAmount() != 1 || !item.hasItemMeta() || isManaged(item))
+        if (item == null || item.getAmount() != 1 || !item.hasItemMeta() || isManaged(item)
+                || com.infinitygear.integration.BookLifecycleItems.hasCustodyMarker(item))
             throw new IllegalStateException("Adoption requires one unmanaged, unstacked item");
         var meta = item.getItemMeta(); var pdc = meta.getPersistentDataContainer();
         String uuid = pdc.get(GearData.KEY_UUID, PersistentDataType.STRING);
@@ -85,7 +86,8 @@ public final class MiningXpItemProjection {
 
     public Result apply(ItemStack item, XpProjectionReceipt receipt) {
         if (!Bukkit.isPrimaryThread()) throw new IllegalStateException("Server thread required");
-        if (item == null || item.getAmount() != 1 || !item.hasItemMeta()) return Result.CONFLICT;
+        if (item == null || item.getAmount() != 1 || !item.hasItemMeta()
+                || com.infinitygear.integration.BookLifecycleItems.hasCustodyMarker(item)) return Result.CONFLICT;
         var meta = item.getItemMeta(); var pdc = meta.getPersistentDataContainer();
         var after = receipt.account();
         if (!receipt.pickaxeId().toString().equals(pdc.get(GearData.KEY_UUID, PersistentDataType.STRING))
@@ -124,7 +126,8 @@ public final class MiningXpItemProjection {
         try { return value == null ? null : UUID.fromString(value); } catch (IllegalArgumentException invalid) { return null; }
     }
     public static boolean matchesAccount(ItemStack item, MiningXpPlan.Account account) {
-        if (item == null || !item.hasItemMeta() || account == null) return false;
+        if (item == null || !item.hasItemMeta() || account == null
+                || com.infinitygear.integration.BookLifecycleItems.hasCustodyMarker(item)) return false;
         var pdc = item.getItemMeta().getPersistentDataContainer();
         return matchesIdentity(pdc, account.pickaxeId(), account.profileId())
                 && !pdc.has(GearData.KEY_QUARANTINED) && !pdc.has(PickaxeData.KEY_QUARANTINED)

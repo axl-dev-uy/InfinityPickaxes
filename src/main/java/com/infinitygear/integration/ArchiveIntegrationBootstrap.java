@@ -1,6 +1,7 @@
 package com.infinitygear.integration;
 
 import com.infinitygear.api.v1.BookIssuanceService;
+import com.infinitygear.api.v1.BookApplicationService;
 import com.infinitygear.api.v1.MiningAuthority;
 import com.infinitygear.mining.*;
 import com.infinitygear.persistence.*;
@@ -20,6 +21,7 @@ public final class ArchiveIntegrationBootstrap implements AutoCloseable {
     private volatile boolean closed;
     private volatile boolean ready;
     private MiningCompletionReceiver completionReceiver;
+    private TrackedBookApplicationService bookApplication;
     private MiningCreditConsumer creditConsumer;
     private MiningNotificationDispatcher dispatcher;
     private BukkitTask dispatchTask;
@@ -66,6 +68,10 @@ public final class ArchiveIntegrationBootstrap implements AutoCloseable {
                     incidents, plugin, ServicePriority.Normal);
             plugin.getServer().getServicesManager().register(BookIssuanceService.class,
                     new CanonicalIssuanceService(plugin, ledger, ledger, tasks), plugin, ServicePriority.Normal);
+            bookApplication = new TrackedBookApplicationService(plugin, ledger, bookLifecycle, tasks,
+                    this::bookApplicationInfrastructureReady);
+            plugin.getServer().getServicesManager().register(BookApplicationService.class,
+                    bookApplication, plugin, ServicePriority.Normal);
             creditConsumer = new MiningCreditConsumer(tasks, inbox);
             dispatcher = new MiningNotificationDispatcher(tasks, miningJournal, creditConsumer,
                     batchSize, Duration.ofMillis(timeout));
@@ -116,6 +122,14 @@ public final class ArchiveIntegrationBootstrap implements AutoCloseable {
 
     public boolean miningPipelineActive() { return infrastructureReady(); }
 
+    private boolean bookApplicationInfrastructureReady() {
+        if (closed || !ready || bookApplication == null) return false;
+        try {
+            return plugin.getServer().getServicesManager().getRegistrations(BookApplicationService.class).stream()
+                    .anyMatch(registration -> registration.getProvider() == bookApplication);
+        } catch (RuntimeException unavailable) { return false; }
+    }
+
     private boolean infrastructureReady() {
         if (closed || !ready || completionReceiver == null || dispatcher == null || creditConsumer == null
                 || !completionReceiver.active() || !creditConsumer.active() || dispatchTask == null
@@ -130,6 +144,10 @@ public final class ArchiveIntegrationBootstrap implements AutoCloseable {
         if (closed) return;
         ready = false;
         closed = true;
+        if (bookApplication != null) {
+            plugin.getServer().getServicesManager().unregister(BookApplicationService.class, bookApplication);
+            bookApplication.close();
+        }
         if (completionReceiver != null) {
             plugin.getServer().getServicesManager().unregister(MiningAuthority.Receiver.class, completionReceiver);
             completionReceiver.close();

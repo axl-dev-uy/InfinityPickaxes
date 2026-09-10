@@ -1,5 +1,29 @@
 # Archives prerequisite contract, version 1
 
+## Task #6 physical application checkpoint (2026-09-10)
+
+The first operation-specific physical participant now exists for the only
+mechanically unambiguous tracked-book route: applying one uniquely held,
+unstacked, non-quarantined Archive book to equipment with no existing matching
+enchantment or Archive attachment. The public `BookApplicationService` requires
+an independently registered production `PolicyAuthority`; DTO validity and test
+policies do not authorize production provenance decisions.
+
+The participant captures exact slots and item images on the server thread, uses
+operation-scoped custody markers and a deterministic source-slot escrow token,
+and advances the durable journal through custody, source removal, equipment
+mutation, finalization and acknowledgement. Recovery is by operation ID only.
+Migration 11 serializes active equipment/source claims, and concurrent mining,
+legacy progression and presentation writers refuse custody-marked equipment.
+
+Discovery reports `book-application` only while the migrated participant and an
+explicit policy authority are both live. Aggregate `book-lifecycle` remains
+false. Replacement, removal, transfer and fusion remain unavailable, and every
+legacy tracked-book route still rejects. Java 25 `test assemble` passed **332
+tests, zero skipped** against disposable MariaDB. This is a verified source
+checkpoint, not live Paper interruption or native serialization acceptance; no
+jar was installed and no deployment was performed.
+
 ## Task #5 journal slice 2 (2026-09-10)
 
 Migration 10 and the blocking `MariaBookLifecycleTransaction` now implement the

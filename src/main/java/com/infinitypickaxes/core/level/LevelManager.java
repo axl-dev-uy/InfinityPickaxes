@@ -73,6 +73,9 @@ public class LevelManager {
      */
     public void addXp(InfinityPickaxe pickaxe, double xpToAdd, Player player) {
         if (pickaxe == null || xpToAdd <= 0) return;
+        if (com.infinitygear.integration.BookLifecycleItems.hasCustodyMarker(pickaxe.getItemStack())) {
+            throw new IllegalStateException("Book lifecycle custody forbids concurrent pickaxe progression");
+        }
         if (com.infinitygear.mining.MiningXpItemProjection.isManaged(pickaxe.getItemStack()))
             throw new IllegalStateException("Database-managed mining XP requires its durable participant");
         if (pickaxe.getLevel() >= maxLevel) {

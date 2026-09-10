@@ -125,14 +125,14 @@ public final class GearManager {
 
     /** Rebuilds profile presentation while leaving enchantments and unconfigured names intact. */
     public void refreshPresentation(GearInstance gear) {
-        if (gear == null) return;
+        if (gear == null || com.infinitygear.integration.BookLifecycleItems.hasCustodyMarker(gear.item())) return;
         profiles.find(gear.profileId()).filter(GearProfile::enabled)
                 .ifPresent(profile -> refreshPresentation(gear, profile));
     }
 
     /** Refreshes one already-managed item without ever converting ordinary equipment. */
     public void refreshPresentation(ItemStack item) {
-        if (!GearData.isGear(item)) return;
+        if (!GearData.isGear(item) || com.infinitygear.integration.BookLifecycleItems.hasCustodyMarker(item)) return;
         inspect(item, true).ifPresent(this::refreshPresentation);
     }
 

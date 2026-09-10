@@ -149,6 +149,7 @@ public class InfinityPickaxes extends JavaPlugin {
         pm.registerEvents(new PickaxeInteractListener(this), this);
         pm.registerEvents(this.guiManager, this);
         pm.registerEvents(new StationListener(this, stationManager), this);
+        pm.registerEvents(new com.infinitygear.integration.BookLifecycleCustodyListener(), this);
         if (getServer().getPluginManager().isPluginEnabled("Nexo")) {
             pm.registerEvents(new com.infinitygear.nexo.NexoStationListener(this, stationManager), this);
         }

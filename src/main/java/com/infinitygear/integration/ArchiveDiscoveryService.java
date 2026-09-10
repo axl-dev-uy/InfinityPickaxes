@@ -68,13 +68,22 @@ public final class ArchiveDiscoveryService implements ArchiveIntegrationService 
         boolean aoe = blast.supported() && dynamite.supported() && vein.supported();
         boolean supportedProducer = ordinary.supported() || blast.supported() || dynamite.supported() || vein.supported();
         boolean strict = supportedProducer && plugin.isStrictMiningDeliveryActive();
+        var applicationService = plugin.getServer().getServicesManager().load(
+                com.infinitygear.api.v1.BookApplicationService.class);
+        boolean application = applicationService != null && applicationService.available()
+                && plugin.getServer().getServicesManager().load(
+                com.infinitygear.api.v1.BookApplicationService.PolicyAuthority.class) != null;
         return Map.ofEntries(Map.entry("discovery", new Capability(true, "Poll snapshot revision on the server thread")),
                 Map.entry("book-recovery", new Capability(plugin.getServer().getServicesManager().load(com.infinitygear.api.v1.BookIssuanceService.class) != null,
                         "Saved item recovery requires MariaDB; new issuance also requires provenance authority")),
                 Map.entry("book-issuance", new Capability(plugin.getServer().getServicesManager().load(com.infinitygear.api.v1.BookIssuanceService.class) != null
                         && plugin.getServer().getServicesManager().load(com.infinitygear.api.v1.BookIssuanceService.ProvenanceAuthority.class) != null,
                         "Requires configured MariaDB journal and issuance authority")),
-                Map.entry("book-lifecycle", new Capability(false, "Requires product policy and inventory participant recovery")),
+                Map.entry("book-application", new Capability(application, application
+                        ? "Tracked no-replacement application participant and production policy are available"
+                        : "Requires the tracked application participant and an explicit production policy authority")),
+                Map.entry("book-lifecycle", new Capability(false,
+                        "Aggregate lifecycle remains unavailable; replacement, removal, transfer and fusion are unsupported")),
                 Map.entry("strict-mining", new Capability(strict, strict
                         ? "MariaDB, completion receiver, XP participant, bounded outbox, durable inbox, and a supported producer path are active"
                         : "Requires MariaDB, completion receiver, XP participant, bounded outbox, durable inbox, and a supported producer path")),

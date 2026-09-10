@@ -95,7 +95,29 @@ public final class MariaBookLifecycleTransaction implements BookLifecycleTransac
                     + "source_value DECIMAL(38,18) NOT NULL,"
                     + "PRIMARY KEY(operation_id,direction,node_kind,node_id,enchantment_key),"
                     + "FOREIGN KEY(operation_id) REFERENCES " + OPERATIONS + "(operation_id)) ENGINE=InnoDB");
+            statement.executeUpdate("CREATE TABLE IF NOT EXISTS infinitygear_book_lifecycle_claims ("
+                    + "participant_kind VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,"
+                    + "tracked_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,"
+                    + "operation_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,"
+                    + "expected_revision BIGINT NULL,"
+                    + "PRIMARY KEY(participant_kind,tracked_id),"
+                    + "UNIQUE KEY uq_infinitygear_lifecycle_claim_operation(operation_id,participant_kind,tracked_id),"
+                    + "FOREIGN KEY(operation_id) REFERENCES " + OPERATIONS + "(operation_id)) ENGINE=InnoDB");
+            // Slice 2 exposed no live physical participant, but backfill any manually prepared
+            // journal rows rather than silently leaving them outside the new custody fence. A
+            // conflicting historical claim fails migration closed for operator inspection.
+            statement.executeUpdate("INSERT INTO infinitygear_book_lifecycle_claims"
+                    + "(participant_kind,tracked_id,operation_id,expected_revision) "
+                    + "SELECT p.participant_kind,p.tracked_id,p.operation_id,p.expected_revision "
+                    + "FROM infinitygear_book_lifecycle_participants p "
+                    + "JOIN " + OPERATIONS + " o ON o.operation_id=p.operation_id "
+                    + "WHERE p.participant_kind IN ('EQUIPMENT','ARCHIVE_BOOK') AND p.tracked_id IS NOT NULL "
+                    + "AND o.phase IN ('PREPARED','CUSTODY_MARKED','SOURCES_REMOVED','EQUIPMENT_MUTATED','OUTPUTS_INSERTED') "
+                    + "AND NOT EXISTS (SELECT 1 FROM infinitygear_book_lifecycle_claims c "
+                    + "WHERE c.operation_id=p.operation_id AND c.participant_kind=p.participant_kind "
+                    + "AND c.tracked_id=p.tracked_id)");
             statement.executeUpdate("INSERT IGNORE INTO infinitygear_schema_migrations(version) VALUES (10)");
+            statement.executeUpdate("INSERT IGNORE INTO infinitygear_schema_migrations(version) VALUES (11)");
         }
     }
 
@@ -146,6 +168,7 @@ public final class MariaBookLifecycleTransaction implements BookLifecycleTransac
 
                 validateBeforeState(connection, request, true);
                 insertOperation(connection, request, fingerprint);
+                insertClaims(connection, request);
                 insertParticipants(connection, request);
                 insertOutputs(connection, request);
                 insertLineage(connection, request);
@@ -195,11 +218,13 @@ public final class MariaBookLifecycleTransaction implements BookLifecycleTransac
                 validateTransition(current.request(), advance.expected(), advance.next());
                 if (advance.next() == Phase.FINALIZED) {
                     finalizeRequest(connection, current.request());
+                    releaseClaims(connection, current.request().operationId());
                     finalizationHook.beforeCommit(connection);
                 } else if (advance.next() == Phase.ABORTED || advance.next() == Phase.ROLLED_BACK) {
                     // The future physical participant may assert restoration only after comparing the saved
                     // before-images. The journal additionally proves that its durable authorities are unchanged.
                     validateBeforeState(connection, current.request(), false);
+                    releaseClaims(connection, current.request().operationId());
                 }
                 try (var update = connection.prepareStatement("UPDATE " + OPERATIONS
                         + " SET previous_phase=phase,phase=?,updated_at=CURRENT_TIMESTAMP(6) "
@@ -473,6 +498,48 @@ public final class MariaBookLifecycleTransaction implements BookLifecycleTransac
             insertParticipant(connection, request.operationId(), index++, input.kind().name(), input.bookId().orElse(null),
                     input.slot(), input.expectedAmount(), input.consumedAmount(), null, null,
                     input.beforeImage().serializedItem(), null);
+        }
+    }
+
+    private static void insertClaims(Connection connection, BookLifecycleRequest request) throws SQLException {
+        if (request.equipment().isPresent()) {
+            var equipment = request.equipment().orElseThrow();
+            insertClaim(connection, "EQUIPMENT", equipment.equipmentId(), request.operationId(),
+                    equipment.expectedRevision());
+        }
+        for (var input : request.inputs()) {
+            if (input.kind() == BookLifecycleRequest.InputKind.ARCHIVE_BOOK) {
+                insertClaim(connection, "ARCHIVE_BOOK", input.bookId().orElseThrow(),
+                        request.operationId(), null);
+            }
+        }
+    }
+
+    private static void insertClaim(Connection connection, String kind, UUID trackedId,
+                                    UUID operationId, Long expectedRevision) throws SQLException {
+        try (var insert = connection.prepareStatement("INSERT INTO infinitygear_book_lifecycle_claims"
+                + "(participant_kind,tracked_id,operation_id,expected_revision) VALUES (?,?,?,?)")) {
+            insert.setString(1, kind);
+            insert.setString(2, trackedId.toString());
+            insert.setString(3, operationId.toString());
+            if (expectedRevision == null) insert.setNull(4, java.sql.Types.BIGINT);
+            else insert.setLong(4, expectedRevision);
+            try {
+                insert.executeUpdate();
+            } catch (SQLException conflict) {
+                if (conflict.getErrorCode() == 1062) {
+                    throw new IllegalStateException("Lifecycle participant is already claimed by another operation");
+                }
+                throw conflict;
+            }
+        }
+    }
+
+    private static void releaseClaims(Connection connection, UUID operationId) throws SQLException {
+        try (var delete = connection.prepareStatement(
+                "DELETE FROM infinitygear_book_lifecycle_claims WHERE operation_id=?")) {
+            delete.setString(1, operationId.toString());
+            delete.executeUpdate();
         }
     }
 

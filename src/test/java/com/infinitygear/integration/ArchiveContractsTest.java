@@ -35,7 +35,24 @@ class ArchiveContractsTest {
         for (Class<?> type : List.of(ArchiveIntegrationService.class, BookLedger.class, BookIssuanceService.class,
                 MiningAuthority.class, MiningCompletion.class, MiningCredit.class,
                 ProvenancePolicy.class, ProvenanceTransition.class,
-                BookLifecycleRequest.class, BookLifecycleTransaction.class)) check(type);
+                BookLifecycleRequest.class, BookLifecycleTransaction.class,
+                BookApplicationService.class)) check(type);
+    }
+
+    @Test void applicationCapabilityRequiresExactCoordinatesAndExplicitPolicyEvidence() {
+        UUID operation = UUID.randomUUID(), actor = UUID.randomUUID();
+        assertDoesNotThrow(() -> new BookApplicationService.Request(operation, actor,
+                4, 5, "minecraft:fortune"));
+        assertThrows(IllegalArgumentException.class, () -> new BookApplicationService.Request(
+                operation, actor, 4, 4, "minecraft:fortune"));
+        assertThrows(IllegalArgumentException.class, () -> new BookApplicationService.Request(
+                operation, actor, 4, 5, "Fortune"));
+        assertThrows(IllegalArgumentException.class, () -> new BookApplicationService.Decision(
+                true, "", "approved"));
+        var policy = new BookApplicationService.PolicyRequest(operation, actor, UUID.randomUUID(),
+                "infinitygear:pickaxe", UUID.randomUUID(), "minecraft:fortune", 1,
+                "archives:reward/1", new BigDecimal("2.5"));
+        assertEquals(new BigDecimal("2.500000000000000000"), policy.sourceValue());
     }
     @Test void miningCompletionRequiresEveryConfirmedPhysicalFact() {
         var completion = new MiningCompletion(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),

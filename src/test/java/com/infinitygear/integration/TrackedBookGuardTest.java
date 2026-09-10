@@ -12,6 +12,7 @@ import org.bukkit.persistence.PersistentDataContainer;
 import org.junit.jupiter.api.Test;
 import static org.mockito.Mockito.*;
 import static org.junit.jupiter.api.Assertions.*;
+import java.util.UUID;
 
 class TrackedBookGuardTest {
     @Test void malformedOrTrackedProvenanceCannotBeStrippedByLegacyOperations() {
@@ -31,5 +32,22 @@ class TrackedBookGuardTest {
             verifyNoInteractions(plugin);
         }
         verify(item, never()).setAmount(anyInt()); verify(item, never()).setItemMeta(any());
+    }
+
+    @Test void lifecycleCustodyRejectsCompetingGearAndXpWriters() {
+        var item = mock(ItemStack.class); var meta = mock(ItemMeta.class);
+        var pdc = mock(PersistentDataContainer.class);
+        when(item.hasItemMeta()).thenReturn(true); when(item.getItemMeta()).thenReturn(meta);
+        when(meta.getPersistentDataContainer()).thenReturn(pdc);
+        when(pdc.has(BookLifecycleItems.OPERATION)).thenReturn(true);
+        var gear = new GearInstance(item, UUID.randomUUID(), "infinitygear:pickaxe", 1, 2, 3, 4);
+        assertThrows(IllegalStateException.class, () -> com.infinitygear.data.GearData.save(gear, false, true));
+        var receipt = mock(com.infinitygear.mining.XpProjectionReceipt.class);
+        try (var bukkit = mockStatic(Bukkit.class)) {
+            bukkit.when(Bukkit::isPrimaryThread).thenReturn(true);
+            assertEquals(com.infinitygear.mining.MiningXpItemProjection.Result.CONFLICT,
+                    new com.infinitygear.mining.MiningXpItemProjection().apply(item, receipt));
+        }
+        verify(item, never()).setItemMeta(any());
     }
 }
