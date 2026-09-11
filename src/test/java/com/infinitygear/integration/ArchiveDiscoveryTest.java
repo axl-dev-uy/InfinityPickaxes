@@ -95,6 +95,9 @@ class ArchiveDiscoveryTest {
         var server = mock(org.bukkit.Server.class);
         var services = mock(org.bukkit.plugin.ServicesManager.class);
         when(plugin.getServer()).thenReturn(server); when(server.getServicesManager()).thenReturn(services);
+        var duplicates = mock(com.infinitypickaxes.core.duplicate.PickaxeDuplicateService.class);
+        when(duplicates.authorityReady()).thenReturn(true);
+        when(plugin.getDuplicateService()).thenReturn(duplicates);
         var application = mock(com.infinitygear.api.v1.BookApplicationService.class);
         when(application.available()).thenReturn(true);
         when(services.load(com.infinitygear.api.v1.BookApplicationService.class)).thenReturn(application);

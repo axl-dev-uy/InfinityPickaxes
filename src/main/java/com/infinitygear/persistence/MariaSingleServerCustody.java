@@ -156,7 +156,7 @@ public final class MariaSingleServerCustody {
         }
     }
 
-    private void requireDeployment(Connection connection) throws Exception {
+    void requireDeployment(Connection connection) throws Exception {
         try (var select = connection.prepareStatement("SELECT server_id,topology,epoch,state FROM infinitygear_deployment_custody"
                 + " WHERE authority_scope=? FOR UPDATE")) {
             select.setString(1, SCOPE);

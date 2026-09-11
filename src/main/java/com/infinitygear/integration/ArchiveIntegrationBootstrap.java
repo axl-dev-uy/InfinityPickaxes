@@ -36,11 +36,19 @@ public final class ArchiveIntegrationBootstrap implements AutoCloseable {
         var config = YamlConfiguration.loadConfiguration(file);
         if (!config.getBoolean("enabled")) return;
         String serverId = config.getString("server-id", "");
+        String quarantineMode = config.getString("quarantine-authority", "sqlite");
+        boolean mariaQuarantine = "mariadb".equalsIgnoreCase(quarantineMode);
+        if (!mariaQuarantine && !"sqlite".equalsIgnoreCase(quarantineMode)) {
+            plugin.getLogger().severe("Archive integration unavailable: quarantine-authority must be sqlite or mariadb");
+            return;
+        }
+        String approvedImportSource = config.getString("quarantine-approved-import-source-id", "");
         final MariaBookLedger ledger;
         final MariaMiningJournal miningJournal;
         final MariaMiningXpLedger xpLedger;
         final MariaMiningCreditInbox inbox;
         final MariaBookLifecycleTransaction bookLifecycle;
+        final MariaQuarantineAuthority quarantineAuthority;
         try {
             var source = new DriverDataSource(config.getString("url"), config.getString("username", ""), config.getString("password", ""));
             custody = new MariaSingleServerCustody(source, serverId);
@@ -49,6 +57,7 @@ public final class ArchiveIntegrationBootstrap implements AutoCloseable {
             xpLedger = new MariaMiningXpLedger(source);
             inbox = new MariaMiningCreditInbox(source);
             bookLifecycle = new MariaBookLifecycleTransaction(source);
+            quarantineAuthority = new MariaQuarantineAuthority(source, custody);
         } catch (IllegalArgumentException invalid) {
             plugin.getLogger().severe("Archive integration unavailable: invalid MariaDB bootstrap configuration");
             return;
@@ -58,9 +67,17 @@ public final class ArchiveIntegrationBootstrap implements AutoCloseable {
         long timeout = Math.max(1, config.getLong("mining-delivery.acceptance-timeout-millis", 5000));
         tasks.database(() -> {
             ledger.migrate(); miningJournal.migrate(); xpLedger.migrate(); inbox.migrate(); bookLifecycle.migrate();
-            custody.migrateAndClaimDeployment(); return null;
+            custody.migrateAndClaimDeployment();
+            if (mariaQuarantine) {
+                quarantineAuthority.migrate();
+                quarantineAuthority.requireAcceptedImport(approvedImportSource);
+                return quarantineAuthority.listRestricted();
+            }
+            return java.util.List.<com.infinitypickaxes.core.duplicate.DuplicateRecord>of();
         }).thenCompose(ignored -> tasks.server(() -> {
             if (closed) return null;
+            if (mariaQuarantine) plugin.getDuplicateService().installMariaAuthority(
+                    quarantineAuthority, tasks, ignored);
             var activation = new XpActivationService(plugin, tasks, xpLedger);
             plugin.setXpActivation(activation);
             plugin.getServer().getPluginManager().registerEvents(activation, plugin);
@@ -127,7 +144,7 @@ public final class ArchiveIntegrationBootstrap implements AutoCloseable {
     public boolean miningPipelineActive() { return infrastructureReady(); }
 
     private boolean bookApplicationInfrastructureReady() {
-        if (closed || !ready || bookApplication == null) return false;
+        if (closed || !ready || bookApplication == null || !plugin.getDuplicateService().authorityReady()) return false;
         try {
             return plugin.getServer().getServicesManager().getRegistrations(BookApplicationService.class).stream()
                     .anyMatch(registration -> registration.getProvider() == bookApplication)
@@ -137,6 +154,7 @@ public final class ArchiveIntegrationBootstrap implements AutoCloseable {
 
     private boolean infrastructureReady() {
         if (closed || !ready || completionReceiver == null || dispatcher == null || creditConsumer == null
+                || !plugin.getDuplicateService().authorityReady()
                 || !completionReceiver.active() || !creditConsumer.active() || dispatchTask == null
                 || dispatchTask.isCancelled()) return false;
         try {

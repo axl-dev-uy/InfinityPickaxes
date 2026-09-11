@@ -38,6 +38,8 @@ public final class CanonicalIssuanceService implements BookIssuanceService {
     }
     @Override public CompletionStage<IssuedBook> issue(BookLedger.Issue request) {
         if (!Bukkit.isPrimaryThread()) throw new IllegalStateException("Server thread required");
+        if (!plugin.getDuplicateService().authorityReady()) return CompletableFuture.failedFuture(
+                new IllegalStateException("Tracked-item quarantine authority is unavailable"));
         var authority = plugin.getServer().getServicesManager().load(ProvenanceAuthority.class);
         return recovery.issue(request, authority);
     }

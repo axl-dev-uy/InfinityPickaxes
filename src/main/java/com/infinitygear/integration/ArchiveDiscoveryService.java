@@ -71,6 +71,7 @@ public final class ArchiveDiscoveryService implements ArchiveIntegrationService 
         var applicationService = plugin.getServer().getServicesManager().load(
                 com.infinitygear.api.v1.BookApplicationService.class);
         boolean application = applicationService != null && applicationService.available()
+                && plugin.getDuplicateService().authorityReady()
                 && plugin.getServer().getServicesManager().load(
                 com.infinitygear.api.v1.BookApplicationService.PolicyAuthority.class) != null;
         return Map.ofEntries(Map.entry("discovery", new Capability(true, "Poll snapshot revision on the server thread")),

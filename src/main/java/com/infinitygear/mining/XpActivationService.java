@@ -162,6 +162,7 @@ public final class XpActivationService implements Listener {
         UUID id = XpItemCustody.itemId(held);
         XpItemCustody.Located located = id == null ? new XpItemCustody.Located(null, null, "main-hand", 0, false) : custody.locate(id);
         if (id == null || !located.uniqueMainHand(owner, id) || located.quarantined()
+                || plugin.getDuplicateService().isRestricted(id)
                 || MiningXpItemProjection.revision(held) == null)
             return CompletableFuture.failedFuture(new IllegalStateException("Target must uniquely hold one adopted, non-quarantined item"));
         var gear = plugin.getGearManager().inspect(held, false).orElseThrow();
@@ -181,6 +182,7 @@ public final class XpActivationService implements Listener {
                     XpItemCustody.Located current = custody.locate(id);
                     ItemStack currentHeld = owner.getInventory().getItemInMainHand();
                     if (!current.uniqueMainHand(owner, id) || current.quarantined()
+                            || plugin.getDuplicateService().isRestricted(id)
                             || !MiningXpItemProjection.matchesAccount(currentHeld, account))
                         throw new IllegalStateException("Item custody or projection changed before administrative commit");
                     return account;
@@ -188,7 +190,8 @@ public final class XpActivationService implements Listener {
                         account.profileId(), account.revision(), account.progress(), action, value, requirements)))
                 .thenCompose(receipt -> tasks.server(() -> {
                     XpItemCustody.Located current = custody.locate(id);
-                    if (!current.uniqueMainHand(owner, id) || current.quarantined())
+                    if (!current.uniqueMainHand(owner, id) || current.quarantined()
+                            || plugin.getDuplicateService().isRestricted(id))
                         return new Report(id, State.CONFLICT, "Custody changed after administrative commit");
                     ItemStack currentHeld = owner.getInventory().getItemInMainHand();
                     var result = projection.apply(currentHeld, receipt.projection());

@@ -209,6 +209,9 @@ public final class InfinityGearServiceImpl implements InfinityGearService {
 
     public OperationResult<ItemStack> createTrackedArtifact(TrackedKind kind, String type) {
         if (!Bukkit.isPrimaryThread()) return OperationResult.failure(FailureReason.NOT_PRIMARY_THREAD, "api.primary-thread");
+        if (!plugin.getDuplicateService().authorityReady()) {
+            return OperationResult.failure(FailureReason.PROVIDER_UNAVAILABLE, "api.quarantine-authority");
+        }
         if (kind == null || kind == TrackedKind.GEAR) return OperationResult.failure(FailureReason.INVALID_ITEM, "api.invalid-artifact");
         try { return OperationResult.success(new TrackedArtifactFactory(plugin).create(kind, type)); }
         catch (RuntimeException invalid) { return OperationResult.failure(FailureReason.PROVIDER_UNAVAILABLE, "api.artifact-provider"); }

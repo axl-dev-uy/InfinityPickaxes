@@ -5,6 +5,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
+import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -50,6 +52,9 @@ class MariaSingleServerCustodyIntegrationTest {
     @Test void newerProcessWithTheSameStableServerIdFencesTheOlderEpoch() throws Exception {
         var oldProcess = new MariaSingleServerCustody(source, "noxward-prison-01");
         oldProcess.migrateAndClaimDeployment();
+        var oldQuarantine = new MariaQuarantineAuthority(source, oldProcess);
+        oldQuarantine.migrate();
+        assertDoesNotThrow(oldQuarantine::listRestricted);
         UUID item = UUID.randomUUID();
         oldProcess.claim(item, "GEAR", UUID.randomUUID());
 
@@ -57,8 +62,15 @@ class MariaSingleServerCustodyIntegrationTest {
         restartedProcess.migrateAndClaimDeployment();
         assertTrue(restartedProcess.epoch() > oldProcess.epoch());
         assertThrows(IllegalStateException.class, () -> oldProcess.verify(item, "GEAR"));
+        assertThrows(IllegalStateException.class, () -> oldQuarantine.quarantine(UUID.randomUUID(),
+                "GEAR", "infinitygear:pickaxe", "stale process", "test", Instant.now(), List.of()));
+        assertThrows(IllegalStateException.class, oldQuarantine::listRestricted);
         restartedProcess.claim(item, "GEAR", UUID.randomUUID());
         assertDoesNotThrow(() -> restartedProcess.verify(item, "GEAR"));
+        var currentQuarantine = new MariaQuarantineAuthority(source, restartedProcess);
+        assertDoesNotThrow(currentQuarantine::listRestricted);
+        assertDoesNotThrow(() -> currentQuarantine.quarantine(UUID.randomUUID(), "GEAR",
+                "infinitygear:pickaxe", "current process", "test", Instant.now(), List.of()));
     }
 
     @Test void anotherServerAndKindConflictCannotTakeAuthority() throws Exception {

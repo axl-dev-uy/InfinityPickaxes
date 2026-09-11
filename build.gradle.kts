@@ -92,3 +92,10 @@ val archivesApiJar = tasks.register<Jar>("archivesApiJar") {
     from(sourceSets.main.get().output) { include("com/infinitygear/api/v1/**") }
 }
 tasks.assemble { dependsOn(archivesApiJar) }
+
+tasks.register<JavaExec>("quarantineMigration") {
+    group = "verification"
+    description = "Explicit read-only preflight/dry-run or approved legacy quarantine import"
+    classpath = sourceSets.test.get().runtimeClasspath
+    mainClass = "com.infinitygear.persistence.LegacyQuarantineMigrationCli"
+}

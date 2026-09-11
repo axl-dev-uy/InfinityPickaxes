@@ -233,6 +233,9 @@ public class InfinityPickaxeCommand implements CommandExecutor, TabCompleter {
                         var gear = plugin.getGearManager().inspect(target.getInventory().getItemInMainHand(), true).orElse(null);
                         var profile = gear == null ? null : plugin.getGearProfiles().find(gear.profileId()).orElse(null);
                         if (gear == null || profile == null) { sender.sendMessage("§cPlayer is not holding InfinityGear."); return true; }
+                        if (!plugin.getDuplicateService().isUsable(gear.item())) {
+                            sender.sendMessage("§cThat tracked item is restricted or its authority is unavailable."); return true;
+                        }
                         gear.level(Math.min(profile.maximumLevel(), Math.max(0, targetLevel)));
                         com.infinitygear.data.GearData.save(gear, plugin.getDuplicateService().isRestricted(gear.uuid()),
                                 com.infinitygear.data.GearData.LEGACY_PICKAXE_PROFILE.equals(gear.profileId()));
@@ -284,6 +287,9 @@ public class InfinityPickaxeCommand implements CommandExecutor, TabCompleter {
                         var gear = plugin.getGearManager().inspect(target.getInventory().getItemInMainHand(), true).orElse(null);
                         var profile = gear == null ? null : plugin.getGearProfiles().find(gear.profileId()).orElse(null);
                         if (gear == null || profile == null) { sender.sendMessage("§cPlayer is not holding InfinityGear."); return true; }
+                        if (!plugin.getDuplicateService().isUsable(gear.item())) {
+                            sender.sendMessage("§cThat tracked item is restricted or its authority is unavailable."); return true;
+                        }
                         if (profile.progressionMode() != com.infinitygear.gear.GearProgressionMode.EXPERIENCE) {
                             sender.sendMessage("§cThat profile does not use EXPERIENCE progression."); return true;
                         }
@@ -391,49 +397,60 @@ public class InfinityPickaxeCommand implements CommandExecutor, TabCompleter {
             switch (args[1].toLowerCase()) {
                 case "list" -> {
                     require(sender, "infinitypickaxes.admin.duplicates.view");
-                    List<DuplicateRecord> records = plugin.getDuplicateService().listRestricted();
-                    sender.sendMessage("§6Restricted tracked-item UUIDs: §f" + records.size());
-                    records.stream().limit(20).forEach(record -> sender.sendMessage(
-                            "§8- §f" + record.uuid() + " §7[§c" + record.status() + "§7] §8" + record.reason()));
+                    plugin.getDuplicateService().listRestrictedAsync().whenComplete((records, failure) ->
+                            Bukkit.getScheduler().runTask(plugin, () -> {
+                                if (duplicateFailure(sender, failure)) return;
+                                sender.sendMessage("§6Restricted tracked-item UUIDs: §f" + records.size());
+                                records.stream().limit(20).forEach(record -> sender.sendMessage(
+                                        "§8- §f" + record.uuid() + " §7[§c" + record.status() + "§7] §8" + record.reason()));
+                            }));
                 }
                 case "inspect" -> {
                     require(sender, "infinitypickaxes.admin.duplicates.view");
                     UUID uuid = requireUuid(args, 2);
-                    DuplicateRecord record = plugin.getDuplicateService().find(uuid).orElse(null);
-                    if (record == null) {
-                        sender.sendMessage("§aThat UUID has no duplicate restriction.");
-                    } else {
-                        sender.sendMessage("§6UUID: §f" + record.uuid());
-                        sender.sendMessage("§6Status: §f" + record.status());
-                        sender.sendMessage("§6Reason: §f" + record.reason());
-                        sender.sendMessage("§6Last update: §f" + record.lastUpdated());
-                        sender.sendMessage("§6Replacement: §f" + (record.replacementUuid() == null ? "none" : record.replacementUuid()));
-                    }
+                    plugin.getDuplicateService().findAsync(uuid).whenComplete((found, failure) ->
+                            Bukkit.getScheduler().runTask(plugin, () -> {
+                                if (duplicateFailure(sender, failure)) return;
+                                DuplicateRecord record = found.orElse(null);
+                                if (record == null) sender.sendMessage("§aThat UUID has no duplicate restriction.");
+                                else {
+                                    sender.sendMessage("§6UUID: §f" + record.uuid());
+                                    sender.sendMessage("§6Status: §f" + record.status());
+                                    sender.sendMessage("§6Reason: §f" + record.reason());
+                                    sender.sendMessage("§6Last update: §f" + record.lastUpdated());
+                                    sender.sendMessage("§6Replacement: §f" + (record.replacementUuid() == null ? "none" : record.replacementUuid()));
+                                }
+                            }));
                 }
                 case "scan" -> {
                     require(sender, "infinitypickaxes.admin.duplicates.scan");
-                    DuplicateScanResult result;
+                    java.util.concurrent.CompletableFuture<DuplicateScanResult> scan;
                     if (args.length >= 3 && !args[2].equalsIgnoreCase("online")) {
                         Player target = Bukkit.getPlayer(args[2]);
                         if (target == null) throw new IllegalArgumentException("Player is not online.");
-                        result = plugin.getDuplicateService().scanPlayer(target, sender.getName());
+                        scan = plugin.getDuplicateService().scanPlayerAsync(target, sender.getName());
                     } else {
-                        result = plugin.getDuplicateService().scanOnline(sender.getName());
+                        scan = plugin.getDuplicateService().scanOnlineAsync(sender.getName());
                     }
-                    sender.sendMessage("§aScanned §f" + result.itemsScanned() + "§a tracked items; detected §f"
-                            + result.duplicatesDetected().size() + "§a compromised UUID(s).");
+                    scan.whenComplete((result, failure) -> Bukkit.getScheduler().runTask(plugin, () -> {
+                        if (duplicateFailure(sender, failure)) return;
+                        sender.sendMessage("§aScanned §f" + result.itemsScanned() + "§a tracked items; detected §f"
+                                + result.duplicatesDetected().size() + "§a compromised UUID(s).");
+                    }));
                 }
                 case "quarantine" -> {
                     require(sender, "infinitypickaxes.admin.duplicates.quarantine");
                     UUID uuid = requireUuid(args, 2);
-                    plugin.getDuplicateService().quarantine(uuid, "Manual administrator quarantine", sender.getName());
-                    sender.sendMessage("§eQuarantined tracked UUID §f" + uuid);
+                    duplicateReply(sender, plugin.getDuplicateService().quarantineAsync(uuid,
+                            "Manual administrator quarantine", sender.getName()),
+                            "§eQuarantined tracked UUID §f" + uuid);
                 }
                 case "revoke" -> {
                     require(sender, "infinitypickaxes.admin.duplicates.resolve");
                     UUID uuid = requireUuid(args, 2);
-                    plugin.getDuplicateService().revoke(uuid, "Manual administrator revocation", sender.getName());
-                    sender.sendMessage("§cPermanently revoked tracked UUID §f" + uuid);
+                    duplicateReply(sender, plugin.getDuplicateService().revokeAsync(uuid,
+                            "Manual administrator revocation", sender.getName()),
+                            "§cPermanently revoked tracked UUID §f" + uuid);
                 }
                 case "resolve", "rekey-held" -> {
                     require(sender, "infinitypickaxes.admin.duplicates.resolve");
@@ -442,9 +459,12 @@ public class InfinityPickaxeCommand implements CommandExecutor, TabCompleter {
                             && (args.length < 3 || !args[2].equalsIgnoreCase("keep-held"))) {
                         throw new IllegalArgumentException("Use /" + label + " duplicate resolve keep-held while holding the canonical item.");
                     }
-                    UUID replacement = plugin.getDuplicateService().rekeyHeld(player);
-                    sender.sendMessage("§aThe held pickaxe is now canonical with UUID §f" + replacement
-                            + "§a. Its previous UUID is permanently revoked.");
+                    plugin.getDuplicateService().rekeyHeldAsync(player).whenComplete((replacement, failure) ->
+                            Bukkit.getScheduler().runTask(plugin, () -> {
+                                if (duplicateFailure(sender, failure)) return;
+                                sender.sendMessage("§aThe held item is now canonical with UUID §f" + replacement
+                                        + "§a. Its previous UUID is permanently revoked.");
+                            }));
                 }
                 default -> sender.sendMessage("§cUnknown duplicate subcommand.");
             }
@@ -453,6 +473,22 @@ public class InfinityPickaxeCommand implements CommandExecutor, TabCompleter {
         } catch (Exception exception) {
             sender.sendMessage("§c" + exception.getMessage());
         }
+    }
+
+    private void duplicateReply(CommandSender sender, java.util.concurrent.CompletableFuture<Void> future,
+                                String success) {
+        future.whenComplete((ignored, failure) -> Bukkit.getScheduler().runTask(plugin, () -> {
+            if (!duplicateFailure(sender, failure)) sender.sendMessage(success);
+        }));
+    }
+
+    private boolean duplicateFailure(CommandSender sender, Throwable failure) {
+        if (failure == null) return false;
+        Throwable cause = failure instanceof java.util.concurrent.CompletionException && failure.getCause() != null
+                ? failure.getCause() : failure;
+        sender.sendMessage("§cDuplicate authority operation failed closed: "
+                + (cause.getMessage() == null ? cause.getClass().getSimpleName() : cause.getMessage()));
+        return true;
     }
 
     private void require(CommandSender sender, String permission) {

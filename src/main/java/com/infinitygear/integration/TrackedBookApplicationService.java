@@ -157,7 +157,11 @@ public final class TrackedBookApplicationService implements BookApplicationServi
             }
             return new DurableContext(receipt, revision, decision);
         }).thenCompose(context -> tasks.server(() -> buildRequest(initial, context)))
-                .thenCompose(request -> tasks.database(() -> lifecycle.prepare(request)));
+                .thenCompose(request -> probe(request.operationId(),
+                        BookApplicationPhaseProbe.Point.BEFORE_PREPARE_COMMIT, PREPARED)
+                        .thenCompose(ignored -> tasks.database(() -> lifecycle.prepare(request))))
+                .thenCompose(prepared -> probe(prepared,
+                        BookApplicationPhaseProbe.Point.AFTER_PREPARE_COMMIT));
     }
 
     private Initial capture(Request request) {
@@ -251,15 +255,20 @@ public final class TrackedBookApplicationService implements BookApplicationServi
             case PREPARED -> policyStillAuthoritative(state).thenCompose(authorized -> authorized
                     ? custodyStillAuthoritative(state).thenCompose(owned -> owned
                     ? tasks.server(() -> markCustody(state)).thenCompose(ok -> ok
-                    ? advance(state, CUSTODY_MARKED) : abortPrepared(state))
+                    ? probe(state, BookApplicationPhaseProbe.Point.AFTER_CUSTODY_MARKING)
+                    .thenCompose(ignored -> advance(state, CUSTODY_MARKED)) : abortPrepared(state))
                     : custodyUnavailable(state)) : abortPrepared(state));
             case CUSTODY_MARKED -> custodyStillAuthoritative(state).thenCompose(owned -> owned
                     ? tasks.server(() -> removeSource(state)).thenCompose(ok -> ok
-                    ? advance(state, SOURCES_REMOVED) : rollbackOrRequire(state, "Source custody changed"))
+                    ? probe(state, BookApplicationPhaseProbe.Point.AFTER_SOURCE_REMOVAL)
+                    .thenCompose(ignored -> advance(state, SOURCES_REMOVED))
+                    : rollbackOrRequire(state, "Source custody changed"))
                     : custodyUnavailable(state));
             case SOURCES_REMOVED -> custodyStillAuthoritative(state).thenCompose(owned -> owned
                     ? tasks.server(() -> mutateEquipment(state)).thenCompose(ok -> ok
-                    ? advance(state, EQUIPMENT_MUTATED) : rollbackOrRequire(state, "Equipment custody changed"))
+                    ? probe(state, BookApplicationPhaseProbe.Point.AFTER_EQUIPMENT_MUTATION)
+                    .thenCompose(ignored -> advance(state, EQUIPMENT_MUTATED))
+                    : rollbackOrRequire(state, "Equipment custody changed"))
                     : custodyUnavailable(state));
             case EQUIPMENT_MUTATED -> custodyStillAuthoritative(state).thenCompose(owned -> owned
                     ? tasks.server(() -> physicalAfterPresent(state)).thenCompose(ok -> ok
@@ -267,7 +276,8 @@ public final class TrackedBookApplicationService implements BookApplicationServi
                     : custodyUnavailable(state));
             case FINALIZED -> custodyStillAuthoritative(state).thenCompose(owned -> owned
                     ? finalizedAuthority(state).thenCompose(authority -> authority
-                    ? tasks.server(() -> acknowledgePhysical(state)).thenCompose(ok -> ok
+                    ? probe(state, BookApplicationPhaseProbe.Point.BEFORE_ACKNOWLEDGEMENT_CLEANUP)
+                    .thenCompose(ignored -> tasks.server(() -> acknowledgePhysical(state))).thenCompose(ok -> ok
                     ? advance(state, ACKNOWLEDGED) : CompletableFuture.completedFuture(result(state,
                     Outcome.RECOVERY_REQUIRED, "Finalized physical cleanup requires operator recovery")))
                     : CompletableFuture.completedFuture(result(state, Outcome.RECOVERY_REQUIRED,
@@ -309,7 +319,23 @@ public final class TrackedBookApplicationService implements BookApplicationServi
                                              BookLifecycleTransaction.Phase next) {
         return tasks.database(() -> lifecycle.advance(new BookLifecycleTransaction.Advance(
                         state.request().operationId(), state.fingerprint(), state.phase(), next)))
+                .thenCompose(advanced -> next == FINALIZED
+                        ? probe(advanced, BookApplicationPhaseProbe.Point.AFTER_FINALIZATION_COMMIT_BEFORE_ACK)
+                        : CompletableFuture.completedFuture(advanced))
                 .thenCompose(this::drive);
+    }
+
+    private CompletionStage<BookLifecycleTransaction.State> probe(
+            BookLifecycleTransaction.State state, BookApplicationPhaseProbe.Point point) {
+        return probe(state.request().operationId(), point, state.phase()).thenApply(ignored -> state);
+    }
+
+    private CompletionStage<Void> probe(UUID operationId, BookApplicationPhaseProbe.Point point,
+                                        BookLifecycleTransaction.Phase durablePhase) {
+        return tasks.server(() -> plugin.getServer().getServicesManager().load(BookApplicationPhaseProbe.class))
+                .thenCompose(provider -> provider == null ? CompletableFuture.completedFuture(null)
+                        : Objects.requireNonNull(provider.reached(operationId, point, durablePhase),
+                        "Acceptance phase probe returned null"));
     }
 
     private CompletionStage<Result> abortPrepared(BookLifecycleTransaction.State state) {
