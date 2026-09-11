@@ -73,6 +73,25 @@ class MariaSingleServerCustodyIntegrationTest {
                 "infinitygear:pickaxe", "current process", "test", Instant.now(), List.of()));
     }
 
+    @Test void restartedOwnerMayResumeOnlyTheExactClaimingOperation() throws Exception {
+        var oldProcess = new MariaSingleServerCustody(source, "noxward-prison-01");
+        oldProcess.migrateAndClaimDeployment();
+        UUID item = UUID.randomUUID(), operation = UUID.randomUUID();
+        oldProcess.claim(item, "ARCHIVE_BOOK", operation);
+
+        var restartedProcess = new MariaSingleServerCustody(source, "noxward-prison-01");
+        restartedProcess.migrateAndClaimDeployment();
+        assertThrows(IllegalStateException.class, () -> restartedProcess.verify(item, "ARCHIVE_BOOK"));
+        assertThrows(IllegalStateException.class,
+                () -> restartedProcess.verifyOrResume(item, "ARCHIVE_BOOK", UUID.randomUUID()));
+        assertThrows(IllegalStateException.class,
+                () -> restartedProcess.verifyOrResume(item, "GEAR", operation));
+
+        assertDoesNotThrow(() -> restartedProcess.verifyOrResume(item, "ARCHIVE_BOOK", operation));
+        assertDoesNotThrow(() -> restartedProcess.verify(item, "ARCHIVE_BOOK"));
+        assertDoesNotThrow(() -> restartedProcess.verifyOrResume(item, "ARCHIVE_BOOK", operation));
+    }
+
     @Test void anotherServerAndKindConflictCannotTakeAuthority() throws Exception {
         var owner = new MariaSingleServerCustody(source, "noxward-prison-01");
         owner.migrateAndClaimDeployment();

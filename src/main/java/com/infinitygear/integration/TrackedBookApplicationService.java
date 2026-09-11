@@ -312,8 +312,8 @@ public final class TrackedBookApplicationService implements BookApplicationServi
         return tasks.database(() -> {
             var equipment = state.request().equipment().orElseThrow();
             var source = state.request().inputs().getFirst().bookId().orElseThrow();
-            custody.verify(equipment.equipmentId(), "GEAR");
-            custody.verify(source, "ARCHIVE_BOOK");
+            custody.verifyOrResume(equipment.equipmentId(), "GEAR", state.request().operationId());
+            custody.verifyOrResume(source, "ARCHIVE_BOOK", state.request().operationId());
             return true;
         }).exceptionally(failure -> false);
     }

@@ -156,6 +156,57 @@ public final class MariaSingleServerCustody {
         }
     }
 
+    /**
+     * Verify operation custody, rebinding only a prior epoch from this same stable server.
+     *
+     * <p>This is restart recovery, not a lease or transfer: kind, server, active state and
+     * the operation that last claimed the identity must all match exactly.</p>
+     */
+    public void verifyOrResume(UUID trackedId, String trackedKind, UUID operationId) throws Exception {
+        Objects.requireNonNull(trackedId, "trackedId");
+        Objects.requireNonNull(operationId, "operationId");
+        try (var connection = source.getConnection()) {
+            connection.setAutoCommit(false);
+            try {
+                requireDeployment(connection);
+                long claimedEpoch;
+                try (var select = connection.prepareStatement("SELECT tracked_kind,server_id,epoch,state,last_operation_id"
+                        + " FROM infinitygear_identity_custody WHERE tracked_id=? FOR UPDATE")) {
+                    select.setString(1, trackedId.toString());
+                    try (var row = select.executeQuery()) {
+                        if (!row.next() || !trackedKind.equals(row.getString(1))
+                                || !serverId.equals(row.getString(2)) || !"ACTIVE".equals(row.getString(4))
+                                || !operationId.toString().equals(row.getString(5))) {
+                            throw new IllegalStateException("Tracked identity operation custody is unavailable");
+                        }
+                        claimedEpoch = row.getLong(3);
+                    }
+                }
+                if (claimedEpoch > epoch) {
+                    throw new IllegalStateException("Tracked identity custody belongs to a newer process");
+                }
+                if (claimedEpoch < epoch) {
+                    try (var update = connection.prepareStatement("UPDATE infinitygear_identity_custody SET epoch=?"
+                            + " WHERE tracked_id=? AND tracked_kind=? AND server_id=? AND epoch=?"
+                            + " AND state='ACTIVE' AND last_operation_id=?")) {
+                        update.setLong(1, epoch);
+                        update.setString(2, trackedId.toString());
+                        update.setString(3, trackedKind);
+                        update.setString(4, serverId);
+                        update.setLong(5, claimedEpoch);
+                        update.setString(6, operationId.toString());
+                        if (update.executeUpdate() != 1) {
+                            throw new IllegalStateException("Tracked identity custody changed during restart recovery");
+                        }
+                    }
+                }
+                connection.commit();
+            } catch (Exception failure) {
+                connection.rollback(); throw failure;
+            }
+        }
+    }
+
     void requireDeployment(Connection connection) throws Exception {
         try (var select = connection.prepareStatement("SELECT server_id,topology,epoch,state FROM infinitygear_deployment_custody"
                 + " WHERE authority_scope=? FOR UPDATE")) {
