@@ -57,6 +57,13 @@ public interface BookApplicationService {
      */
     interface PolicyAuthority {
         Decision authorize(PolicyRequest request) throws Exception;
+
+        /**
+         * Recheck that previously persisted policy evidence is still current.
+         * Called away from the server thread immediately before physical custody.
+         * Providers must fail closed after reload or policy revision changes.
+         */
+        default boolean recognizes(String policyReference) throws Exception { return false; }
     }
 
     record PolicyRequest(UUID operationId, UUID actorId, UUID equipmentId, String profileId,

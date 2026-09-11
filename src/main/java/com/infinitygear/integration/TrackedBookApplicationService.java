@@ -9,6 +9,7 @@ import com.infinitygear.data.GearData;
 import com.infinitygear.data.TrackedItemData;
 import com.infinitygear.data.TrackedKind;
 import com.infinitygear.persistence.MariaBookLifecycleTransaction;
+import com.infinitygear.persistence.MariaSingleServerCustody;
 import com.infinitypickaxes.InfinityPickaxes;
 import io.papermc.paper.block.TileStateInventoryHolder;
 import org.bukkit.Bukkit;
@@ -42,17 +43,20 @@ public final class TrackedBookApplicationService implements BookApplicationServi
     private final InfinityPickaxes plugin;
     private final BookLedger ledger;
     private final MariaBookLifecycleTransaction lifecycle;
+    private final MariaSingleServerCustody custody;
     private final IntegrationTasks tasks;
     private final java.util.function.BooleanSupplier active;
     private final ConcurrentHashMap<UUID, CompletableFuture<Result>> inFlight = new ConcurrentHashMap<>();
     private volatile boolean closed;
 
     public TrackedBookApplicationService(InfinityPickaxes plugin, BookLedger ledger,
-                                         MariaBookLifecycleTransaction lifecycle, IntegrationTasks tasks,
+                                         MariaBookLifecycleTransaction lifecycle, MariaSingleServerCustody custody,
+                                         IntegrationTasks tasks,
                                          java.util.function.BooleanSupplier active) {
         this.plugin = Objects.requireNonNull(plugin, "plugin");
         this.ledger = Objects.requireNonNull(ledger, "ledger");
         this.lifecycle = Objects.requireNonNull(lifecycle, "lifecycle");
+        this.custody = Objects.requireNonNull(custody, "custody");
         this.tasks = Objects.requireNonNull(tasks, "tasks");
         this.active = Objects.requireNonNull(active, "active");
     }
@@ -130,6 +134,8 @@ public final class TrackedBookApplicationService implements BookApplicationServi
     private CompletionStage<BookLifecycleTransaction.State> prepareNew(Initial initial,
                                                                         PolicyAuthority authority) {
         return tasks.database(() -> {
+            custody.claim(initial.equipmentId(), "GEAR", initial.request().operationId());
+            custody.claim(initial.bookId(), "ARCHIVE_BOOK", initial.request().operationId());
             BookLedger.Receipt receipt = ledger.find(initial.bookId()).orElseThrow(() ->
                     new IllegalArgumentException("Unknown Archive source book"));
             if (receipt.consumed()) throw new IllegalArgumentException("Archive source book is already consumed");
@@ -242,20 +248,31 @@ public final class TrackedBookApplicationService implements BookApplicationServi
         if (!available()) return CompletableFuture.completedFuture(result(state, Outcome.RECOVERY_REQUIRED,
                 "Integration is reloading or stopped"));
         return switch (state.phase()) {
-            case PREPARED -> tasks.server(() -> markCustody(state)).thenCompose(ok -> ok
-                    ? advance(state, CUSTODY_MARKED) : abortPrepared(state));
-            case CUSTODY_MARKED -> tasks.server(() -> removeSource(state)).thenCompose(ok -> ok
-                    ? advance(state, SOURCES_REMOVED) : rollbackOrRequire(state, "Source custody changed"));
-            case SOURCES_REMOVED -> tasks.server(() -> mutateEquipment(state)).thenCompose(ok -> ok
-                    ? advance(state, EQUIPMENT_MUTATED) : rollbackOrRequire(state, "Equipment custody changed"));
-            case EQUIPMENT_MUTATED -> tasks.server(() -> physicalAfterPresent(state)).thenCompose(ok -> ok
-                    ? advance(state, FINALIZED) : rollbackOrRequire(state, "Physical after-state is not exact"));
-            case FINALIZED -> finalizedAuthority(state).thenCompose(authority -> authority
+            case PREPARED -> policyStillAuthoritative(state).thenCompose(authorized -> authorized
+                    ? custodyStillAuthoritative(state).thenCompose(owned -> owned
+                    ? tasks.server(() -> markCustody(state)).thenCompose(ok -> ok
+                    ? advance(state, CUSTODY_MARKED) : abortPrepared(state))
+                    : custodyUnavailable(state)) : abortPrepared(state));
+            case CUSTODY_MARKED -> custodyStillAuthoritative(state).thenCompose(owned -> owned
+                    ? tasks.server(() -> removeSource(state)).thenCompose(ok -> ok
+                    ? advance(state, SOURCES_REMOVED) : rollbackOrRequire(state, "Source custody changed"))
+                    : custodyUnavailable(state));
+            case SOURCES_REMOVED -> custodyStillAuthoritative(state).thenCompose(owned -> owned
+                    ? tasks.server(() -> mutateEquipment(state)).thenCompose(ok -> ok
+                    ? advance(state, EQUIPMENT_MUTATED) : rollbackOrRequire(state, "Equipment custody changed"))
+                    : custodyUnavailable(state));
+            case EQUIPMENT_MUTATED -> custodyStillAuthoritative(state).thenCompose(owned -> owned
+                    ? tasks.server(() -> physicalAfterPresent(state)).thenCompose(ok -> ok
+                    ? advance(state, FINALIZED) : rollbackOrRequire(state, "Physical after-state is not exact"))
+                    : custodyUnavailable(state));
+            case FINALIZED -> custodyStillAuthoritative(state).thenCompose(owned -> owned
+                    ? finalizedAuthority(state).thenCompose(authority -> authority
                     ? tasks.server(() -> acknowledgePhysical(state)).thenCompose(ok -> ok
                     ? advance(state, ACKNOWLEDGED) : CompletableFuture.completedFuture(result(state,
                     Outcome.RECOVERY_REQUIRED, "Finalized physical cleanup requires operator recovery")))
                     : CompletableFuture.completedFuture(result(state, Outcome.RECOVERY_REQUIRED,
-                    "Finalized attachment authority does not match the physical request")));
+                    "Finalized attachment authority does not match the physical request")))
+                    : custodyUnavailable(state));
             case ACKNOWLEDGED -> CompletableFuture.completedFuture(result(state, Outcome.ACKNOWLEDGED,
                     "Archive book application acknowledged"));
             case ABORTED, ROLLED_BACK -> CompletableFuture.completedFuture(result(state, Outcome.REJECTED,
@@ -263,6 +280,29 @@ public final class TrackedBookApplicationService implements BookApplicationServi
             case OUTPUTS_INSERTED -> CompletableFuture.completedFuture(result(state, Outcome.RECOVERY_REQUIRED,
                     "Unexpected output phase for application"));
         };
+    }
+
+    private CompletionStage<Boolean> policyStillAuthoritative(BookLifecycleTransaction.State state) {
+        return tasks.server(() -> plugin.getServer().getServicesManager().load(PolicyAuthority.class))
+                .thenCompose(authority -> authority == null
+                        ? CompletableFuture.completedFuture(false)
+                        : tasks.database(() -> authority.recognizes(
+                                state.request().lineageDecision().policyReference())));
+    }
+
+    private CompletionStage<Boolean> custodyStillAuthoritative(BookLifecycleTransaction.State state) {
+        return tasks.database(() -> {
+            var equipment = state.request().equipment().orElseThrow();
+            var source = state.request().inputs().getFirst().bookId().orElseThrow();
+            custody.verify(equipment.equipmentId(), "GEAR");
+            custody.verify(source, "ARCHIVE_BOOK");
+            return true;
+        }).exceptionally(failure -> false);
+    }
+
+    private CompletionStage<Result> custodyUnavailable(BookLifecycleTransaction.State state) {
+        return CompletableFuture.completedFuture(result(state, Outcome.RECOVERY_REQUIRED,
+                "Single-server custody authority is stale or unavailable"));
     }
 
     private CompletionStage<Result> advance(BookLifecycleTransaction.State state,

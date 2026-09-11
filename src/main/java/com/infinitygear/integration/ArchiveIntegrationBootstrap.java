@@ -24,6 +24,7 @@ public final class ArchiveIntegrationBootstrap implements AutoCloseable {
     private TrackedBookApplicationService bookApplication;
     private MiningCreditConsumer creditConsumer;
     private MiningNotificationDispatcher dispatcher;
+    private MariaSingleServerCustody custody;
     private BukkitTask dispatchTask;
 
     public ArchiveIntegrationBootstrap(InfinityPickaxes plugin) {
@@ -34,6 +35,7 @@ public final class ArchiveIntegrationBootstrap implements AutoCloseable {
         if (!file.exists()) plugin.saveResource("database.yml", false);
         var config = YamlConfiguration.loadConfiguration(file);
         if (!config.getBoolean("enabled")) return;
+        String serverId = config.getString("server-id", "");
         final MariaBookLedger ledger;
         final MariaMiningJournal miningJournal;
         final MariaMiningXpLedger xpLedger;
@@ -41,6 +43,7 @@ public final class ArchiveIntegrationBootstrap implements AutoCloseable {
         final MariaBookLifecycleTransaction bookLifecycle;
         try {
             var source = new DriverDataSource(config.getString("url"), config.getString("username", ""), config.getString("password", ""));
+            custody = new MariaSingleServerCustody(source, serverId);
             ledger = new MariaBookLedger(source);
             miningJournal = new MariaMiningJournal(source);
             xpLedger = new MariaMiningXpLedger(source);
@@ -54,7 +57,8 @@ public final class ArchiveIntegrationBootstrap implements AutoCloseable {
         long interval = Math.max(1, config.getLong("mining-delivery.interval-ticks", 100));
         long timeout = Math.max(1, config.getLong("mining-delivery.acceptance-timeout-millis", 5000));
         tasks.database(() -> {
-            ledger.migrate(); miningJournal.migrate(); xpLedger.migrate(); inbox.migrate(); bookLifecycle.migrate(); return null;
+            ledger.migrate(); miningJournal.migrate(); xpLedger.migrate(); inbox.migrate(); bookLifecycle.migrate();
+            custody.migrateAndClaimDeployment(); return null;
         }).thenCompose(ignored -> tasks.server(() -> {
             if (closed) return null;
             var activation = new XpActivationService(plugin, tasks, xpLedger);
@@ -68,7 +72,7 @@ public final class ArchiveIntegrationBootstrap implements AutoCloseable {
                     incidents, plugin, ServicePriority.Normal);
             plugin.getServer().getServicesManager().register(BookIssuanceService.class,
                     new CanonicalIssuanceService(plugin, ledger, ledger, tasks), plugin, ServicePriority.Normal);
-            bookApplication = new TrackedBookApplicationService(plugin, ledger, bookLifecycle, tasks,
+            bookApplication = new TrackedBookApplicationService(plugin, ledger, bookLifecycle, custody, tasks,
                     this::bookApplicationInfrastructureReady);
             plugin.getServer().getServicesManager().register(BookApplicationService.class,
                     bookApplication, plugin, ServicePriority.Normal);
@@ -126,7 +130,8 @@ public final class ArchiveIntegrationBootstrap implements AutoCloseable {
         if (closed || !ready || bookApplication == null) return false;
         try {
             return plugin.getServer().getServicesManager().getRegistrations(BookApplicationService.class).stream()
-                    .anyMatch(registration -> registration.getProvider() == bookApplication);
+                    .anyMatch(registration -> registration.getProvider() == bookApplication)
+                    && plugin.getServer().getServicesManager().load(BookApplicationService.PolicyAuthority.class) != null;
         } catch (RuntimeException unavailable) { return false; }
     }
 
