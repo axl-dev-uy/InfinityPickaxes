@@ -89,7 +89,7 @@ public final class ArchiveIntegrationBootstrap implements AutoCloseable {
                     incidents, plugin, ServicePriority.Normal);
             plugin.getServer().getServicesManager().register(BookIssuanceService.class,
                     new CanonicalIssuanceService(plugin, ledger, ledger, tasks), plugin, ServicePriority.Normal);
-            bookApplication = new TrackedBookApplicationService(plugin, ledger, bookLifecycle, custody, tasks,
+            bookApplication = new TrackedBookApplicationService(plugin, ledger, ledger, bookLifecycle, custody, tasks,
                     this::bookApplicationInfrastructureReady);
             plugin.getServer().getServicesManager().register(BookApplicationService.class,
                     bookApplication, plugin, ServicePriority.Normal);

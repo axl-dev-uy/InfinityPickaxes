@@ -7,7 +7,6 @@ import com.infinitypickaxes.InfinityPickaxes;
 import org.bukkit.Bukkit;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.persistence.PersistentDataType;
-import java.util.Arrays;
 import java.util.UUID;
 import java.util.concurrent.*;
 
@@ -33,25 +32,9 @@ public final class CanonicalIssuanceService implements BookIssuanceService {
                 var item = new CanonicalBookFactory().create(enchant, receipt.issue().level());
                 ArchiveBookIdentity.stamp(item, receipt);
                 TrackedItemData.stamp(item, TrackedKind.ARCHIVE_BOOK, receipt.issue().enchantmentKey(), receipt.bookId());
-                return stableNativeBytes(item);
+                return item.serializeAsBytes();
             }
         });
-    }
-
-    /**
-     * Paper may normalize a freshly constructed item's component encoding on its
-     * first native deserialize/serialize cycle. Persist only a fixed-point image
-     * so the bytes returned for physical delivery are exactly the bytes later
-     * presented to lifecycle validation.
-     */
-    private static byte[] stableNativeBytes(ItemStack item) {
-        byte[] current = item.serializeAsBytes();
-        for (int attempt = 0; attempt < 4; attempt++) {
-            byte[] normalized = ItemStack.deserializeBytes(current).serializeAsBytes();
-            if (Arrays.equals(current, normalized)) return current;
-            current = normalized;
-        }
-        throw new IllegalStateException("Native Archive-book serialization did not stabilize");
     }
     @Override public CompletionStage<IssuedBook> issue(BookLedger.Issue request) {
         if (!Bukkit.isPrimaryThread()) throw new IllegalStateException("Server thread required");

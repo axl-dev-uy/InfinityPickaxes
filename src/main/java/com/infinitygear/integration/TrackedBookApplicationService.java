@@ -42,6 +42,7 @@ public final class TrackedBookApplicationService implements BookApplicationServi
 
     private final InfinityPickaxes plugin;
     private final BookLedger ledger;
+    private final BookArtifacts artifacts;
     private final MariaBookLifecycleTransaction lifecycle;
     private final MariaSingleServerCustody custody;
     private final IntegrationTasks tasks;
@@ -49,12 +50,13 @@ public final class TrackedBookApplicationService implements BookApplicationServi
     private final ConcurrentHashMap<UUID, CompletableFuture<Result>> inFlight = new ConcurrentHashMap<>();
     private volatile boolean closed;
 
-    public TrackedBookApplicationService(InfinityPickaxes plugin, BookLedger ledger,
+    public TrackedBookApplicationService(InfinityPickaxes plugin, BookLedger ledger, BookArtifacts artifacts,
                                          MariaBookLifecycleTransaction lifecycle, MariaSingleServerCustody custody,
                                          IntegrationTasks tasks,
                                          java.util.function.BooleanSupplier active) {
         this.plugin = Objects.requireNonNull(plugin, "plugin");
         this.ledger = Objects.requireNonNull(ledger, "ledger");
+        this.artifacts = Objects.requireNonNull(artifacts, "artifacts");
         this.lifecycle = Objects.requireNonNull(lifecycle, "lifecycle");
         this.custody = Objects.requireNonNull(custody, "custody");
         this.tasks = Objects.requireNonNull(tasks, "tasks");
@@ -139,6 +141,8 @@ public final class TrackedBookApplicationService implements BookApplicationServi
             BookLedger.Receipt receipt = ledger.find(initial.bookId()).orElseThrow(() ->
                     new IllegalArgumentException("Unknown Archive source book"));
             if (receipt.consumed()) throw new IllegalArgumentException("Archive source book is already consumed");
+            byte[] canonicalArtifact = artifacts.load(initial.bookId()).orElseThrow(() ->
+                    new IllegalArgumentException("Archive source artifact is absent"));
             long revision = lifecycle.equipmentRevision(initial.equipmentId()).orElse(0L);
             if (lifecycle.attachment(initial.equipmentId(), initial.enchantmentKey()).isPresent()) {
                 throw new IllegalArgumentException("Archive attachment replacement is not supported");
@@ -155,7 +159,7 @@ public final class TrackedBookApplicationService implements BookApplicationServi
                 throw new IllegalArgumentException(decision == null ? "Application policy returned no decision"
                         : decision.reason());
             }
-            return new DurableContext(receipt, revision, decision);
+            return new DurableContext(receipt, canonicalArtifact, revision, decision);
         }).thenCompose(context -> tasks.server(() -> buildRequest(initial, context)))
                 .thenCompose(request -> probe(request.operationId(),
                         BookApplicationPhaseProbe.Point.BEFORE_PREPARE_COMMIT, PREPARED)
@@ -210,6 +214,10 @@ public final class TrackedBookApplicationService implements BookApplicationServi
         if (!ArchiveBookIdentity.matches(source, context.receipt())) {
             throw new IllegalArgumentException("Archive source artifact or identity mismatch");
         }
+        ItemStack canonicalSource = ItemStack.deserializeBytes(context.canonicalArtifact());
+        if (source.getAmount() != canonicalSource.getAmount() || !source.isSimilar(canonicalSource)) {
+            throw new IllegalArgumentException("Archive source differs from its canonical artifact");
+        }
         var gear = plugin.getGearManager().inspect(equipment, true).orElseThrow();
         if (!gear.uuid().equals(initial.equipmentId()) || !gear.profileId().equals(initial.profileId())) {
             throw new IllegalStateException("Equipment identity changed before preparation");
@@ -225,7 +233,7 @@ public final class TrackedBookApplicationService implements BookApplicationServi
         var equipmentSlot = inventorySlot(initial.request().actorId(), initial.request().equipmentSlot());
         var sourceSlot = inventorySlot(initial.request().actorId(), initial.request().sourceSlot());
         var beforeEquipment = image(equipment);
-        var beforeSource = image(source);
+        var beforeSource = new BookLifecycleRequest.ItemImage(context.canonicalArtifact());
         var equipmentParticipant = new BookLifecycleRequest.Equipment(initial.equipmentId(),
                 context.revision(), Math.addExact(context.revision(), 1), equipmentSlot,
                 beforeEquipment, image(plan.afterImage()));
@@ -586,8 +594,7 @@ public final class TrackedBookApplicationService implements BookApplicationServi
 
     private static boolean same(ItemStack left, ItemStack right) {
         return left != null && right != null && left.getAmount() == right.getAmount()
-                && left.isSimilar(right)
-                && java.util.Arrays.equals(left.serializeAsBytes(), right.serializeAsBytes());
+                && left.isSimilar(right);
     }
 
     private static BookLifecycleRequest.InventorySlot inventorySlot(UUID actor, int slot) {
@@ -645,6 +652,12 @@ public final class TrackedBookApplicationService implements BookApplicationServi
 
     private record Initial(Request request, UUID equipmentId, String profileId, UUID bookId,
                            String enchantmentKey, int level, ItemStack equipment, ItemStack source) { }
-    private record DurableContext(BookLedger.Receipt receipt, long revision, Decision decision) { }
+    private record DurableContext(BookLedger.Receipt receipt, byte[] canonicalArtifact,
+                                  long revision, Decision decision) {
+        private DurableContext {
+            canonicalArtifact = canonicalArtifact.clone();
+        }
+        @Override public byte[] canonicalArtifact() { return canonicalArtifact.clone(); }
+    }
     private record Participant(Player player, ItemStack equipment, ItemStack source) { }
 }

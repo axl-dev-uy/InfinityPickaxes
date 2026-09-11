@@ -8,7 +8,6 @@ import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
 
-import java.util.Arrays;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -80,7 +79,9 @@ public final class BookLifecycleItems {
     }
 
     static boolean exact(ItemStack item, BookLifecycleRequest.ItemImage image) {
-        return item != null && Arrays.equals(item.serializeAsBytes(), image.serializedItem());
+        if (item == null) return false;
+        ItemStack expected = deserialize(image);
+        return item.getAmount() == expected.getAmount() && item.isSimilar(expected);
     }
 
     static boolean finalizedEquipmentMatches(ItemStack item, BookLifecycleRequest.Equipment equipment) {
@@ -92,8 +93,8 @@ public final class BookLifecycleItems {
         ItemStack normalizedExpected = deserialize(equipment.afterImage());
         clearCustody(normalizedLive);
         clearCustody(normalizedExpected);
-        return normalizedLive.isSimilar(normalizedExpected)
-                && Arrays.equals(normalizedLive.serializeAsBytes(), normalizedExpected.serializeAsBytes());
+        return normalizedLive.getAmount() == normalizedExpected.getAmount()
+                && normalizedLive.isSimilar(normalizedExpected);
     }
 
     static boolean markerMatches(ItemStack item, UUID operationId, String role, String beforeHash) {
