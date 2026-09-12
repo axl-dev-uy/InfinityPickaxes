@@ -136,8 +136,6 @@ public final class TrackedBookApplicationService implements BookApplicationServi
     private CompletionStage<BookLifecycleTransaction.State> prepareNew(Initial initial,
                                                                         PolicyAuthority authority) {
         return tasks.database(() -> {
-            custody.claim(initial.equipmentId(), "GEAR", initial.request().operationId());
-            custody.claim(initial.bookId(), "ARCHIVE_BOOK", initial.request().operationId());
             BookLedger.Receipt receipt = ledger.find(initial.bookId()).orElseThrow(() ->
                     new IllegalArgumentException("Unknown Archive source book"));
             if (receipt.consumed()) throw new IllegalArgumentException("Archive source book is already consumed");
@@ -164,8 +162,8 @@ public final class TrackedBookApplicationService implements BookApplicationServi
                 .thenCompose(request -> probe(request.operationId(),
                         BookApplicationPhaseProbe.Point.BEFORE_PREPARE_COMMIT, PREPARED)
                         .thenCompose(ignored -> tasks.database(() -> lifecycle.prepare(request))))
-                .thenCompose(prepared -> probe(prepared,
-                        BookApplicationPhaseProbe.Point.AFTER_PREPARE_COMMIT));
+                .thenCompose(prepared -> bindLifecycleCustody(prepared).thenCompose(ignored -> probe(prepared,
+                        BookApplicationPhaseProbe.Point.AFTER_PREPARE_COMMIT)));
     }
 
     private Initial capture(Request request) {
@@ -312,10 +310,26 @@ public final class TrackedBookApplicationService implements BookApplicationServi
         return tasks.database(() -> {
             var equipment = state.request().equipment().orElseThrow();
             var source = state.request().inputs().getFirst().bookId().orElseThrow();
-            custody.verifyOrResume(equipment.equipmentId(), "GEAR", state.request().operationId());
-            custody.verifyOrResume(source, "ARCHIVE_BOOK", state.request().operationId());
+            if (state.phase() == FINALIZED || state.phase() == ACKNOWLEDGED) {
+                custody.verifyOrResume(equipment.equipmentId(), "GEAR", state.request().operationId());
+                custody.verifyOrResume(source, "ARCHIVE_BOOK", state.request().operationId());
+            } else {
+                custody.bindLifecycleClaim(equipment.equipmentId(), "GEAR", state.request().operationId());
+                custody.bindLifecycleClaim(source, "ARCHIVE_BOOK", state.request().operationId());
+            }
             return true;
         }).exceptionally(failure -> false);
+    }
+
+    private CompletionStage<BookLifecycleTransaction.State> bindLifecycleCustody(
+            BookLifecycleTransaction.State state) {
+        return tasks.database(() -> {
+            var equipment = state.request().equipment().orElseThrow();
+            var source = state.request().inputs().getFirst().bookId().orElseThrow();
+            custody.bindLifecycleClaim(equipment.equipmentId(), "GEAR", state.request().operationId());
+            custody.bindLifecycleClaim(source, "ARCHIVE_BOOK", state.request().operationId());
+            return state;
+        });
     }
 
     private CompletionStage<Result> custodyUnavailable(BookLifecycleTransaction.State state) {

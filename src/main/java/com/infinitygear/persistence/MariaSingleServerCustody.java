@@ -131,6 +131,67 @@ public final class MariaSingleServerCustody {
         }
     }
 
+    /**
+     * Bind custody to an already-prepared physical lifecycle operation. The
+     * lifecycle claim is locked and verified first, so a rejected competing
+     * request cannot overwrite the incumbent operation binding.
+     */
+    public void bindLifecycleClaim(UUID trackedId, String trackedKind, UUID operationId) throws Exception {
+        Objects.requireNonNull(trackedId, "trackedId");
+        Objects.requireNonNull(operationId, "operationId");
+        if (trackedKind == null || !trackedKind.matches("[A-Z][A-Z0-9_]{0,31}")) {
+            throw new IllegalArgumentException("Invalid tracked kind");
+        }
+        String participantKind = switch (trackedKind) {
+            case "GEAR" -> "EQUIPMENT";
+            case "ARCHIVE_BOOK" -> "ARCHIVE_BOOK";
+            default -> throw new IllegalArgumentException("Unsupported lifecycle custody kind");
+        };
+        try (var connection = source.getConnection()) {
+            connection.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
+            connection.setAutoCommit(false);
+            try {
+                requireDeployment(connection);
+                try (var claim = connection.prepareStatement("SELECT operation_id FROM infinitygear_book_lifecycle_claims"
+                        + " WHERE participant_kind=? AND tracked_id=? FOR UPDATE")) {
+                    claim.setString(1, participantKind);
+                    claim.setString(2, trackedId.toString());
+                    try (var row = claim.executeQuery()) {
+                        if (!row.next() || !operationId.toString().equals(row.getString(1))) {
+                            throw new IllegalStateException("Lifecycle participant is not claimed by this operation");
+                        }
+                    }
+                }
+                try (var insert = connection.prepareStatement("INSERT IGNORE INTO infinitygear_identity_custody"
+                        + "(tracked_id,tracked_kind,server_id,epoch,state,last_operation_id) VALUES (?,?,?,?, 'ACTIVE',?)")) {
+                    insert.setString(1, trackedId.toString()); insert.setString(2, trackedKind);
+                    insert.setString(3, serverId); insert.setLong(4, epoch);
+                    insert.setString(5, operationId.toString()); insert.executeUpdate();
+                }
+                try (var select = connection.prepareStatement("SELECT tracked_kind,server_id,state FROM infinitygear_identity_custody"
+                        + " WHERE tracked_id=? FOR UPDATE")) {
+                    select.setString(1, trackedId.toString());
+                    try (var row = select.executeQuery()) {
+                        if (!row.next() || !trackedKind.equals(row.getString(1))
+                                || !serverId.equals(row.getString(2)) || !"ACTIVE".equals(row.getString(3))) {
+                            throw new IllegalStateException("Tracked identity is not mutable on this server");
+                        }
+                    }
+                }
+                try (var update = connection.prepareStatement("UPDATE infinitygear_identity_custody SET last_operation_id=?,epoch=?"
+                        + " WHERE tracked_id=? AND tracked_kind=? AND server_id=? AND state='ACTIVE'")) {
+                    update.setString(1, operationId.toString()); update.setLong(2, epoch);
+                    update.setString(3, trackedId.toString()); update.setString(4, trackedKind);
+                    update.setString(5, serverId);
+                    if (update.executeUpdate() != 1) throw new IllegalStateException("Custody changed during lifecycle binding");
+                }
+                connection.commit();
+            } catch (Exception failure) {
+                connection.rollback(); throw failure;
+            }
+        }
+    }
+
     /** Verify current-session mutation authority without changing the identity row. */
     public void verify(UUID trackedId, String trackedKind) throws Exception {
         Objects.requireNonNull(trackedId, "trackedId");

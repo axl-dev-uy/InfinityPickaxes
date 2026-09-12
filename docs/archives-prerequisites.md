@@ -3,7 +3,8 @@
 ## Task #7 single-server acceptance checkpoint (2026-09-12)
 
 This section supersedes current-status claims in older dated checkpoints below;
-their implementation history remains intact. InfinityGear `12d0986` now includes
+their implementation history remains intact. The pinned Task #7 acceptance
+implementation source, InfinityGear `12d0986`, includes
 the narrow tracked no-replacement application participant plus configured
 `SINGLE_SERVER` deployment epochs, exact identity custody claims, a migration-13
 MariaDB quarantine authority and an explicit fail-closed SQLite importer.
@@ -24,6 +25,10 @@ reconfirming and backing up the real deployment SQLite DB/WAL/SHM set,
 import/freeze and capability enablement each remain separate Axel/Officer_Ray
 decisions. `book-application` defaults false and aggregate `book-lifecycle`
 remains false.
+
+The current InfinityGear head is `d68d7de`, a documentation-only descendant of
+the pinned acceptance implementation; it is not a replacement acceptance
+artifact.
 
 ## Task #6 physical application checkpoint (2026-09-10)
 

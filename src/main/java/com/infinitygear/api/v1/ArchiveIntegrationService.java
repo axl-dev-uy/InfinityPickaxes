@@ -2,7 +2,12 @@ package com.infinitygear.api.v1;
 
 import java.util.*;
 
-/** Versioned, read-only discovery. Obtain through Bukkit ServicesManager; call on the server thread. */
+/**
+ * Versioned external, read-only discovery contract. Obtain through Bukkit's
+ * ServicesManager and call on the server thread. Its nested records are the
+ * immutable replacement for implementation-facing profile, socket and policy
+ * types; consumers must not use {@code com.infinitygear.api.InfinityGearService}.
+ */
 public interface ArchiveIntegrationService {
     int API_VERSION = 1;
     Snapshot snapshot(int gearLevel);

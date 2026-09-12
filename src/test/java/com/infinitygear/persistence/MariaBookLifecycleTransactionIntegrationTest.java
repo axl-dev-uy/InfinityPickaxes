@@ -122,6 +122,49 @@ class MariaBookLifecycleTransactionIntegrationTest {
     }
 
     @Test
+    void rejectedCompetitorCannotReplaceIncumbentCustodyBindingOrRestartRecovery() throws Exception {
+        var custody = new MariaSingleServerCustody(source, "noxward-prison-01");
+        custody.migrateAndClaimDeployment();
+        var sourceBook = sourceBook("0.875", 57);
+        UUID actor = UUID.randomUUID(), equipment = UUID.randomUUID();
+        var incumbent = application(UUID.randomUUID(), actor, equipment, 0, sourceBook, 57, 58, "0.875");
+        var competitor = application(UUID.randomUUID(), actor, equipment, 0, sourceBook, 57, 59, "0.875");
+
+        lifecycle.prepare(incumbent);
+        custody.bindLifecycleClaim(equipment, "GEAR", incumbent.operationId());
+        custody.bindLifecycleClaim(sourceBook.bookId(), "ARCHIVE_BOOK", incumbent.operationId());
+
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            Future<Boolean> rejected = executor.submit(() -> {
+                try {
+                    lifecycle.prepare(competitor);
+                    return false;
+                } catch (IllegalStateException expected) {
+                    return true;
+                }
+            });
+            assertTrue(rejected.get());
+        }
+        assertTrue(lifecycle.find(competitor.operationId()).isEmpty());
+        assertThrows(IllegalStateException.class,
+                () -> custody.bindLifecycleClaim(equipment, "GEAR", competitor.operationId()));
+        assertThrows(IllegalStateException.class,
+                () -> custody.bindLifecycleClaim(sourceBook.bookId(), "ARCHIVE_BOOK", competitor.operationId()));
+
+        var restarted = new MariaSingleServerCustody(source, "noxward-prison-01");
+        restarted.migrateAndClaimDeployment();
+        assertDoesNotThrow(() -> restarted.bindLifecycleClaim(equipment, "GEAR", incumbent.operationId()));
+        assertDoesNotThrow(() -> restarted.bindLifecycleClaim(sourceBook.bookId(), "ARCHIVE_BOOK", incumbent.operationId()));
+        assertDoesNotThrow(() -> restarted.verifyOrResume(equipment, "GEAR", incumbent.operationId()));
+        assertDoesNotThrow(() -> restarted.verifyOrResume(sourceBook.bookId(), "ARCHIVE_BOOK", incumbent.operationId()));
+        try (var connection = source.getConnection()) {
+            assertEquals(2, count(connection, "SELECT COUNT(*) FROM infinitygear_identity_custody"
+                    + " WHERE tracked_id IN ('" + equipment + "','" + sourceBook.bookId() + "')"
+                    + " AND last_operation_id='" + incumbent.operationId() + "'"));
+        }
+    }
+
+    @Test
     void removalTransfersExactAttachmentValueToTheDeclaredBookAndArtifact() throws Exception {
         UUID actor = UUID.randomUUID();
         UUID equipment = UUID.randomUUID();

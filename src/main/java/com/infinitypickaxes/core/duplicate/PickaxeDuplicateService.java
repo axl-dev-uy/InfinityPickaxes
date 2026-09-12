@@ -82,6 +82,9 @@ public class PickaxeDuplicateService implements AutoCloseable {
 
     public boolean authorityReady() { return !mariaRequired || mariaReady; }
 
+    /** True only after the operator-approved MariaDB quarantine import is active. */
+    public boolean mariaAuthorityReady() { return mariaRequired && mariaReady; }
+
     public boolean isRestricted(UUID uuid) {
         return uuid != null && (restricted.contains(uuid) || pendingRestricted.contains(uuid));
     }

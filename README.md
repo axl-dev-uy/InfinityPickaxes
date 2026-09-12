@@ -112,6 +112,15 @@ resolution.
 
 `InfinityGearService` is registered through Bukkit’s service manager. It provides immutable inspection snapshots, profile resolution, gear/artifact creation, explicit mutation results and reason/message codes, enchantment application, socket inspection, duplicate/quarantine status, eligible enchantments, and immutable resolved global-plus-profile enchantment policy queries. Mutation methods require the primary server thread.
 
+`InfinityGearService` and the legacy `InfinityPickaxesAPI` are deprecated
+in-plugin compatibility surfaces. Their signatures intentionally retain legacy
+implementation types and they are not part of the published consumer contract.
+External integrations must compile only against the separately built
+`archives-api-v1` artifact and use immutable `com.infinitygear.api.v1` DTOs and
+Bukkit services, especially `ArchiveIntegrationService` for profile/enchantment
+discovery. The build verifies that this artifact contains no compatibility or
+implementation classes.
+
 The separate `com.infinitygear.api.v1.BookApplicationService` is the
 operation-scoped entry point for tracked Archive book application. It accepts an
 external `PolicyAuthority`, preserves server-thread inventory access and

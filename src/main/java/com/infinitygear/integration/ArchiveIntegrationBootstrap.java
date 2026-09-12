@@ -26,6 +26,7 @@ public final class ArchiveIntegrationBootstrap implements AutoCloseable {
     private MiningNotificationDispatcher dispatcher;
     private MariaSingleServerCustody custody;
     private BukkitTask dispatchTask;
+    private volatile boolean mariaQuarantineReady;
 
     public ArchiveIntegrationBootstrap(InfinityPickaxes plugin) {
         this.plugin = plugin;
@@ -76,8 +77,12 @@ public final class ArchiveIntegrationBootstrap implements AutoCloseable {
             return java.util.List.<com.infinitypickaxes.core.duplicate.DuplicateRecord>of();
         }).thenCompose(ignored -> tasks.server(() -> {
             if (closed) return null;
-            if (mariaQuarantine) plugin.getDuplicateService().installMariaAuthority(
-                    quarantineAuthority, tasks, ignored);
+            if (mariaQuarantine) {
+                plugin.getDuplicateService().installMariaAuthority(quarantineAuthority, tasks, ignored);
+                mariaQuarantineReady = bookApplicationQuarantineReady(plugin.getDuplicateService());
+                if (!mariaQuarantineReady) throw new IllegalStateException(
+                        "Approved MariaDB quarantine authority did not become active");
+            }
             var activation = new XpActivationService(plugin, tasks, xpLedger);
             plugin.setXpActivation(activation);
             plugin.getServer().getPluginManager().registerEvents(activation, plugin);
@@ -89,10 +94,14 @@ public final class ArchiveIntegrationBootstrap implements AutoCloseable {
                     incidents, plugin, ServicePriority.Normal);
             plugin.getServer().getServicesManager().register(BookIssuanceService.class,
                     new CanonicalIssuanceService(plugin, ledger, ledger, tasks), plugin, ServicePriority.Normal);
-            bookApplication = new TrackedBookApplicationService(plugin, ledger, ledger, bookLifecycle, custody, tasks,
-                    this::bookApplicationInfrastructureReady);
-            plugin.getServer().getServicesManager().register(BookApplicationService.class,
-                    bookApplication, plugin, ServicePriority.Normal);
+            if (mariaQuarantineReady) {
+                bookApplication = new TrackedBookApplicationService(plugin, ledger, ledger, bookLifecycle, custody, tasks,
+                        this::bookApplicationInfrastructureReady);
+                plugin.getServer().getServicesManager().register(BookApplicationService.class,
+                        bookApplication, plugin, ServicePriority.Normal);
+            } else {
+                plugin.getLogger().warning("Archive book application remains unavailable until an approved MariaDB quarantine authority is active");
+            }
             creditConsumer = new MiningCreditConsumer(tasks, inbox);
             dispatcher = new MiningNotificationDispatcher(tasks, miningJournal, creditConsumer,
                     batchSize, Duration.ofMillis(timeout));
@@ -144,12 +153,18 @@ public final class ArchiveIntegrationBootstrap implements AutoCloseable {
     public boolean miningPipelineActive() { return infrastructureReady(); }
 
     private boolean bookApplicationInfrastructureReady() {
-        if (closed || !ready || bookApplication == null || !plugin.getDuplicateService().authorityReady()) return false;
+        if (closed || !ready || bookApplication == null || !mariaQuarantineReady
+                || !bookApplicationQuarantineReady(plugin.getDuplicateService())) return false;
         try {
             return plugin.getServer().getServicesManager().getRegistrations(BookApplicationService.class).stream()
                     .anyMatch(registration -> registration.getProvider() == bookApplication)
                     && plugin.getServer().getServicesManager().load(BookApplicationService.PolicyAuthority.class) != null;
         } catch (RuntimeException unavailable) { return false; }
+    }
+
+    static boolean bookApplicationQuarantineReady(
+            com.infinitypickaxes.core.duplicate.PickaxeDuplicateService duplicates) {
+        return duplicates != null && duplicates.mariaAuthorityReady();
     }
 
     private boolean infrastructureReady() {
@@ -167,6 +182,7 @@ public final class ArchiveIntegrationBootstrap implements AutoCloseable {
         if (closed) return;
         ready = false;
         closed = true;
+        mariaQuarantineReady = false;
         if (bookApplication != null) {
             plugin.getServer().getServicesManager().unregister(BookApplicationService.class, bookApplication);
             bookApplication.close();

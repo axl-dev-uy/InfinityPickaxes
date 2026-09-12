@@ -39,6 +39,11 @@ class ArchiveContractsTest {
                 BookApplicationService.class)) check(type);
     }
 
+    @Test void legacyCompatibilityServiceIsNotAdvertisedAsExternalApi() {
+        assertTrue(com.infinitygear.api.InfinityGearService.class.isAnnotationPresent(Deprecated.class));
+        assertTrue(com.infinitypickaxes.api.InfinityPickaxesAPI.class.isAnnotationPresent(Deprecated.class));
+    }
+
     @Test void applicationCapabilityRequiresExactCoordinatesAndExplicitPolicyEvidence() {
         UUID operation = UUID.randomUUID(), actor = UUID.randomUUID();
         assertDoesNotThrow(() -> new BookApplicationService.Request(operation, actor,

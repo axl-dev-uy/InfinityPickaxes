@@ -2,8 +2,9 @@
 
 ## Task #7 acceptance update — 2026-09-12
 
-The dated slices below remain the design and implementation history. The current
-source at `12d0986` adds the approved `SINGLE_SERVER` deployment/epoch authority,
+The dated slices below remain the design and implementation history. The pinned
+Task #7 acceptance implementation source at `12d0986` adds the approved
+`SINGLE_SERVER` deployment/epoch authority,
 identity custody claims, migration-13 MariaDB quarantine authority and explicit
 legacy SQLite importer around the Task #6 application participant. The external
 production policy remains operation-specific: NoxwardArchives may authorize only

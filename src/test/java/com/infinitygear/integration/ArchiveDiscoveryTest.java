@@ -97,6 +97,7 @@ class ArchiveDiscoveryTest {
         when(plugin.getServer()).thenReturn(server); when(server.getServicesManager()).thenReturn(services);
         var duplicates = mock(com.infinitypickaxes.core.duplicate.PickaxeDuplicateService.class);
         when(duplicates.authorityReady()).thenReturn(true);
+        when(duplicates.mariaAuthorityReady()).thenReturn(true);
         when(plugin.getDuplicateService()).thenReturn(duplicates);
         var application = mock(com.infinitygear.api.v1.BookApplicationService.class);
         when(application.available()).thenReturn(true);
@@ -110,6 +111,24 @@ class ArchiveDiscoveryTest {
         assertFalse(new ArchiveDiscoveryService(plugin).capabilities().get("book-application").available());
         when(application.available()).thenReturn(true);
         when(services.load(com.infinitygear.api.v1.BookApplicationService.PolicyAuthority.class)).thenReturn(null);
+        assertFalse(new ArchiveDiscoveryService(plugin).capabilities().get("book-application").available());
+    }
+
+    @Test void sqliteQuarantineCannotAdvertiseApplicationEvenWithLivePolicyAndService() {
+        var plugin = mock(InfinityPickaxes.class);
+        var server = mock(org.bukkit.Server.class);
+        var services = mock(org.bukkit.plugin.ServicesManager.class);
+        when(plugin.getServer()).thenReturn(server); when(server.getServicesManager()).thenReturn(services);
+        var duplicates = mock(com.infinitypickaxes.core.duplicate.PickaxeDuplicateService.class);
+        when(duplicates.authorityReady()).thenReturn(true); // SQLite is a healthy legacy authority.
+        when(duplicates.mariaAuthorityReady()).thenReturn(false);
+        when(plugin.getDuplicateService()).thenReturn(duplicates);
+        var application = mock(com.infinitygear.api.v1.BookApplicationService.class);
+        when(application.available()).thenReturn(true);
+        when(services.load(com.infinitygear.api.v1.BookApplicationService.class)).thenReturn(application);
+        when(services.load(com.infinitygear.api.v1.BookApplicationService.PolicyAuthority.class))
+                .thenReturn(mock(com.infinitygear.api.v1.BookApplicationService.PolicyAuthority.class));
+
         assertFalse(new ArchiveDiscoveryService(plugin).capabilities().get("book-application").available());
     }
 }

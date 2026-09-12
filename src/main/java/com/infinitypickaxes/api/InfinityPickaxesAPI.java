@@ -10,7 +10,11 @@ import com.infinitypickaxes.core.pickaxe.PickaxeManager;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 
-/** @deprecated Use the Bukkit-registered InfinityGearService capability API. */
+/**
+ * @deprecated This legacy adapter and its {@code InfinityGearService} return
+ * type are in-plugin compatibility APIs. External integrations must use the
+ * Bukkit-registered {@code com.infinitygear.api.v1} services instead.
+ */
 @Deprecated
 public final class InfinityPickaxesAPI {
 
