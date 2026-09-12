@@ -7,13 +7,15 @@ description: Persistent profile-driven levelable gear with safe enchantment stat
 provides: [InfinityPickaxes]
 depend: [EcoEnchants, eco]
 softdepend: [PlaceholderAPI, WorldGuard, Vault, Nexo]
+libraries:
+  - org.mariadb.jdbc:mariadb-java-client:3.5.6
 
 commands:
   infinitygear:
     description: Main command for InfinityGear
     aliases: [igear]
     permission: infinitygear.use
-    usage: /<command> [give|artifact|reload|setlevel|addxp|station|duplicate|migration]
+    usage: /<command> [give|artifact|reload|setlevel|addxp|station|duplicate|migration|xp]
   infinitypickaxes:
     description: Deprecated InfinityPickaxes compatibility command
     aliases: [ipickaxe, infinitypickaxe]
@@ -21,6 +23,7 @@ commands:
     usage: /<command> [give|reload|setlevel|addxp|gui|duplicate]
 
 permissions:
+  noxwardarchives.alerts.mining: {default: op}
   infinitygear.use: {default: true}
   infinitygear.admin:
     default: op
@@ -32,6 +35,7 @@ permissions:
       infinitygear.admin.addxp: true
       infinitygear.admin.station: true
       infinitygear.admin.migration: true
+      infinitygear.admin.xp: true
       infinitygear.admin.duplicates.view: true
       infinitygear.admin.duplicates.scan: true
       infinitygear.admin.duplicates.quarantine: true
@@ -44,6 +48,7 @@ permissions:
   infinitygear.admin.addxp: {default: op}
   infinitygear.admin.station: {default: op}
   infinitygear.admin.migration: {default: op}
+  infinitygear.admin.xp: {default: op}
   infinitygear.admin.duplicates.view: {default: op}
   infinitygear.admin.duplicates.scan: {default: op}
   infinitygear.admin.duplicates.quarantine: {default: op}

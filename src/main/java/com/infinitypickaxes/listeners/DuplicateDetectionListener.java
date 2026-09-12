@@ -111,7 +111,7 @@ public final class DuplicateDetectionListener implements Listener {
             var retainedStorages = new ArrayList<>(pendingStorages);
             pendingStorages.clear();
             pendingScan = null;
-            plugin.getDuplicateService().scanOnline(scanActor, retainedStorages);
+            plugin.getDuplicateService().scanOnlineAsync(scanActor, retainedStorages);
         }, delay);
     }
 
@@ -133,6 +133,6 @@ public final class DuplicateDetectionListener implements Listener {
         long interval = Math.max(200L, plugin.getConfigManager().getConfig()
                 .getLong("duplicate-protection.scan-interval-ticks", 1200L));
         periodicScan = Bukkit.getScheduler().runTaskTimer(plugin,
-                () -> plugin.getDuplicateService().scanOnline("automatic:periodic"), interval, interval);
+                () -> plugin.getDuplicateService().scanOnlineAsync("automatic:periodic"), interval, interval);
     }
 }

@@ -79,7 +79,7 @@ class DuplicateDetectionListenerTest {
             delayedScan.getValue().run();
 
             ArgumentCaptor<Collection<PhysicalStorageKey>> retained = ArgumentCaptor.forClass(Collection.class);
-            verify(duplicateService).scanOnline(eq("automatic:storage-close:builder"), retained.capture());
+            verify(duplicateService).scanOnlineAsync(eq("automatic:storage-close:builder"), retained.capture());
             assertEquals(1, retained.getValue().size());
             assertTrue(retained.getValue().contains(new PhysicalStorageKey(
                     "block:" + worldUuid + ":8:72:-3")));

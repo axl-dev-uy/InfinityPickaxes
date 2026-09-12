@@ -40,6 +40,9 @@ public final class GearManager {
     }
 
     public ItemStack create(String profileId, int startingLevel) {
+        if (plugin.getDuplicateService() != null && !plugin.getDuplicateService().authorityReady()) {
+            throw new IllegalStateException("Tracked-item authority is unavailable");
+        }
         GearProfile profile = profiles.find(profileId).filter(GearProfile::enabled)
                 .orElseThrow(() -> new IllegalArgumentException("Unknown or disabled gear profile: " + profileId));
         int level = Math.min(profile.maximumLevel(), Math.max(0, startingLevel));
@@ -85,9 +88,12 @@ public final class GearManager {
         if (item == null || item.getType() == Material.AIR || item.getAmount() != 1) return Optional.empty();
         if (GearData.isGear(item)) {
             Optional<GearInstance> existing = inspect(item, true);
-            existing.ifPresent(this::refreshPresentation);
+            existing.filter(ignored -> plugin.getDuplicateService() == null
+                            || plugin.getDuplicateService().isUsable(item))
+                    .ifPresent(this::refreshPresentation);
             return existing;
         }
+        if (plugin.getDuplicateService() != null && !plugin.getDuplicateService().authorityReady()) return Optional.empty();
         if (isRecognizedExternalItem(item)) return Optional.empty();
 
         List<GearProfile> matches = profiles.accepting(item.getType(), true);
@@ -125,14 +131,14 @@ public final class GearManager {
 
     /** Rebuilds profile presentation while leaving enchantments and unconfigured names intact. */
     public void refreshPresentation(GearInstance gear) {
-        if (gear == null) return;
+        if (gear == null || com.infinitygear.integration.BookLifecycleItems.hasCustodyMarker(gear.item())) return;
         profiles.find(gear.profileId()).filter(GearProfile::enabled)
                 .ifPresent(profile -> refreshPresentation(gear, profile));
     }
 
     /** Refreshes one already-managed item without ever converting ordinary equipment. */
     public void refreshPresentation(ItemStack item) {
-        if (!GearData.isGear(item)) return;
+        if (!GearData.isGear(item) || com.infinitygear.integration.BookLifecycleItems.hasCustodyMarker(item)) return;
         inspect(item, true).ifPresent(this::refreshPresentation);
     }
 

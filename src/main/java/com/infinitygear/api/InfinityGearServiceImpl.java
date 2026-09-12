@@ -50,7 +50,7 @@ public final class InfinityGearServiceImpl implements InfinityGearService {
 
     public OperationResult<Integer> applyEnchantment(ItemStack gearItem, ItemStack book, String enchantmentKey) {
         if (!Bukkit.isPrimaryThread()) return OperationResult.failure(FailureReason.NOT_PRIMARY_THREAD, "api.primary-thread");
-        ApplicationValidation validation = validateApplication(gearItem, book, enchantmentKey);
+        ApplicationValidation validation = validateApplication(gearItem, book, enchantmentKey, false);
         if (!validation.result().success()) return validation.result();
         GearInstance gear = validation.gear();
         var managed = validation.managed();
@@ -85,6 +85,12 @@ public final class InfinityGearServiceImpl implements InfinityGearService {
     }
 
     private ApplicationValidation validateApplication(ItemStack gearItem, ItemStack book, String enchantmentKey) {
+        return validateApplication(gearItem, book, enchantmentKey, false);
+    }
+
+    private ApplicationValidation validateApplication(ItemStack gearItem, ItemStack book, String enchantmentKey,
+                                                        boolean allowTrackedArchive) {
+        if (!allowTrackedArchive && com.infinitygear.integration.ArchiveBookIdentity.marked(book)) return invalid(FailureReason.INVALID_BOOK, "api.archive-lifecycle-required");
         GearInstance gear = manager.inspect(gearItem, true).orElse(null);
         if (gear == null) return invalid(FailureReason.NOT_GEAR, "api.not-gear");
         if (!plugin.getDuplicateService().isUsable(gearItem)) {
@@ -127,6 +133,47 @@ public final class InfinityGearServiceImpl implements InfinityGearService {
                 enchantment, decision);
     }
 
+    /** Internal server-thread planner used only by the journaled Archive participant. */
+    public ArchiveApplicationPlan prepareArchiveApplication(ItemStack gearItem, ItemStack book,
+                                                             String enchantmentKey, java.util.UUID operationId,
+                                                             long resultingAttachmentRevision) {
+        if (!Bukkit.isPrimaryThread()) throw new IllegalStateException("Server thread required");
+        if (!com.infinitygear.integration.ArchiveBookIdentity.marked(book)) {
+            throw new IllegalArgumentException("Tracked Archive book required");
+        }
+        ApplicationValidation validation = validateApplication(gearItem, book, enchantmentKey, true);
+        if (!validation.result().success()) throw new IllegalArgumentException(validation.result().messageKey());
+        int current = gearItem.getEnchantmentLevel(validation.enchantment());
+        if (current != 0) throw new IllegalArgumentException("Archive application replacement is not supported");
+        var event = new com.infinitygear.api.events.GearEnchantChangeEvent(null, gearItem,
+                validation.gear().profileId(), validation.managed().socket().getKeyString(), 0,
+                validation.decision().resultingLevel(),
+                com.infinitygear.api.events.GearEnchantChangeEvent.Operation.APPLY);
+        Bukkit.getPluginManager().callEvent(event);
+        if (event.isCancelled()) throw new IllegalArgumentException("api.cancelled");
+
+        ItemStack after = gearItem.clone();
+        var meta = after.getItemMeta();
+        if (meta == null) throw new IllegalArgumentException("api.invalid-item");
+        meta.addEnchant(validation.enchantment(), validation.decision().resultingLevel(), true);
+        after.setItemMeta(meta);
+        GearInstance afterGear = manager.inspect(after, true)
+                .orElseThrow(() -> new IllegalArgumentException("api.not-gear"));
+        GearData.save(afterGear, false, GearData.LEGACY_PICKAXE_PROFILE.equals(afterGear.profileId()));
+        com.infinitygear.integration.BookLifecycleItems.markEquipmentAfter(after, operationId,
+                resultingAttachmentRevision);
+        return new ArchiveApplicationPlan(validation.gear().uuid(), validation.gear().profileId(),
+                validation.decision().resultingLevel(), after);
+    }
+
+    public record ArchiveApplicationPlan(java.util.UUID equipmentId, String profileId,
+                                         int resultingLevel, ItemStack afterImage) {
+        public ArchiveApplicationPlan {
+            afterImage = afterImage.clone();
+        }
+        @Override public ItemStack afterImage() { return afterImage.clone(); }
+    }
+
     private static ApplicationValidation invalid(FailureReason reason, String key) {
         return new ApplicationValidation(OperationResult.failure(reason, key), null, null, null, null);
     }
@@ -162,6 +209,9 @@ public final class InfinityGearServiceImpl implements InfinityGearService {
 
     public OperationResult<ItemStack> createTrackedArtifact(TrackedKind kind, String type) {
         if (!Bukkit.isPrimaryThread()) return OperationResult.failure(FailureReason.NOT_PRIMARY_THREAD, "api.primary-thread");
+        if (!plugin.getDuplicateService().authorityReady()) {
+            return OperationResult.failure(FailureReason.PROVIDER_UNAVAILABLE, "api.quarantine-authority");
+        }
         if (kind == null || kind == TrackedKind.GEAR) return OperationResult.failure(FailureReason.INVALID_ITEM, "api.invalid-artifact");
         try { return OperationResult.success(new TrackedArtifactFactory(plugin).create(kind, type)); }
         catch (RuntimeException invalid) { return OperationResult.failure(FailureReason.PROVIDER_UNAVAILABLE, "api.artifact-provider"); }

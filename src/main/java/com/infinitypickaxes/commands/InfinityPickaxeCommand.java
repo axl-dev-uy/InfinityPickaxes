@@ -74,6 +74,7 @@ public class InfinityPickaxeCommand implements CommandExecutor, TabCompleter {
             return handleArtifactGive(sender, label, args);
         }
         if (gearCommand && sub.equals("station")) return handleStation(sender, label, args);
+        if (gearCommand && sub.equals("xp")) return handleXp(sender, label, args);
         if (gearCommand && sub.equals("migration")) {
             if (!hasPermissionOrAdmin(sender, "infinitygear.admin.migration")) { plugin.getMessageManager().sendMessage(sender, "messages.no-permission"); return true; }
             java.nio.file.Path marker = plugin.getDataFolder().toPath()
@@ -219,12 +220,22 @@ public class InfinityPickaxeCommand implements CommandExecutor, TabCompleter {
                     plugin.getMessageManager().sendMessage(sender, "messages.player-not-found");
                     return true;
                 }
+                if (com.infinitygear.mining.MiningXpItemProjection.isManaged(target.getInventory().getItemInMainHand())) {
+                    var activation = plugin.getXpActivation();
+                    if (activation == null) { sender.sendMessage("§cThe MariaDB XP participant is unavailable."); return true; }
+                    try { replyAsync(sender, activation.setLevel(sender, target, Integer.parseInt(args[2]))); }
+                    catch (NumberFormatException invalid) { sender.sendMessage("§cInvalid level."); }
+                    return true;
+                }
                 if (gearCommand) {
                     try {
                         int targetLevel = Integer.parseInt(args[2]);
                         var gear = plugin.getGearManager().inspect(target.getInventory().getItemInMainHand(), true).orElse(null);
                         var profile = gear == null ? null : plugin.getGearProfiles().find(gear.profileId()).orElse(null);
                         if (gear == null || profile == null) { sender.sendMessage("§cPlayer is not holding InfinityGear."); return true; }
+                        if (!plugin.getDuplicateService().isUsable(gear.item())) {
+                            sender.sendMessage("§cThat tracked item is restricted or its authority is unavailable."); return true;
+                        }
                         gear.level(Math.min(profile.maximumLevel(), Math.max(0, targetLevel)));
                         com.infinitygear.data.GearData.save(gear, plugin.getDuplicateService().isRestricted(gear.uuid()),
                                 com.infinitygear.data.GearData.LEGACY_PICKAXE_PROFILE.equals(gear.profileId()));
@@ -263,12 +274,22 @@ public class InfinityPickaxeCommand implements CommandExecutor, TabCompleter {
                     plugin.getMessageManager().sendMessage(sender, "messages.player-not-found");
                     return true;
                 }
+                if (com.infinitygear.mining.MiningXpItemProjection.isManaged(target.getInventory().getItemInMainHand())) {
+                    var activation = plugin.getXpActivation();
+                    if (activation == null) { sender.sendMessage("§cThe MariaDB XP participant is unavailable."); return true; }
+                    try { replyAsync(sender, activation.addXp(sender, target, Double.parseDouble(args[2]))); }
+                    catch (NumberFormatException invalid) { sender.sendMessage("§cInvalid XP amount."); }
+                    return true;
+                }
                 if (gearCommand) {
                     try {
                         double amount = Double.parseDouble(args[2]);
                         var gear = plugin.getGearManager().inspect(target.getInventory().getItemInMainHand(), true).orElse(null);
                         var profile = gear == null ? null : plugin.getGearProfiles().find(gear.profileId()).orElse(null);
                         if (gear == null || profile == null) { sender.sendMessage("§cPlayer is not holding InfinityGear."); return true; }
+                        if (!plugin.getDuplicateService().isUsable(gear.item())) {
+                            sender.sendMessage("§cThat tracked item is restricted or its authority is unavailable."); return true;
+                        }
                         if (profile.progressionMode() != com.infinitygear.gear.GearProgressionMode.EXPERIENCE) {
                             sender.sendMessage("§cThat profile does not use EXPERIENCE progression."); return true;
                         }
@@ -313,8 +334,57 @@ public class InfinityPickaxeCommand implements CommandExecutor, TabCompleter {
             sender.sendMessage("§e/ipickaxe addxp <player> <amount> §7- Adds XP to pickaxe.");
             sender.sendMessage("§e/ipickaxe reload §7- Reloads configurations and menus.");
             sender.sendMessage("§e/ipickaxe duplicate §7- Duplicate detection and quarantine administration.");
+            sender.sendMessage("§e/igear xp <adopt|reconcile|issues> §7- MariaDB XP custody and recovery.");
         }
         sender.sendMessage("§8▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬");
+    }
+
+    private boolean handleXp(CommandSender sender, String label, String[] args) {
+        if (!hasPermissionOrAdmin(sender, "infinitygear.admin.xp")) {
+            plugin.getMessageManager().sendMessage(sender, "messages.no-permission"); return true;
+        }
+        var activation = plugin.getXpActivation();
+        if (activation == null) { sender.sendMessage("§cThe MariaDB XP participant is unavailable."); return true; }
+        if (args.length < 2) { sender.sendMessage("§e/" + label + " xp <adopt player|reconcile uuid|issues>"); return true; }
+        try {
+            switch (args[1].toLowerCase(java.util.Locale.ROOT)) {
+                case "adopt" -> {
+                    if (args.length < 3) throw new IllegalArgumentException("Specify an online player holding the sole canonical item.");
+                    Player target = Bukkit.getPlayer(args[2]);
+                    if (target == null) throw new IllegalArgumentException("Player is not online.");
+                    sender.sendMessage("§eBeginning fenced XP adoption; the item is fail-closed immediately.");
+                    replyAsync(sender, activation.adopt(sender, target));
+                }
+                case "reconcile" -> {
+                    UUID id = requireUuid(args, 2);
+                    sender.sendMessage("§eInspecting custody and committed receipts without overwriting conflicts.");
+                    replyAsync(sender, activation.recover(id));
+                }
+                case "issues" -> activation.issues().whenComplete((issues, failure) -> Bukkit.getScheduler().runTask(plugin, () -> {
+                    if (failure != null) { sender.sendMessage("§cCould not read XP reconciliation records."); return; }
+                    sender.sendMessage("§6Unresolved XP reconciliation records: §f" + issues.size());
+                    issues.forEach(issue -> sender.sendMessage("§8- §f" + issue.pickaxeId() + " §7[§e" + issue.status()
+                            + "§7] §8" + issue.detail() + " @ " + issue.location()));
+                }));
+                default -> throw new IllegalArgumentException("Unknown XP subcommand.");
+            }
+        } catch (IllegalArgumentException invalid) { sender.sendMessage("§c" + invalid.getMessage()); }
+        return true;
+    }
+
+    private void replyAsync(CommandSender sender, java.util.concurrent.CompletableFuture<com.infinitygear.mining.XpActivationService.Report> future) {
+        future.whenComplete((report, failure) -> Bukkit.getScheduler().runTask(plugin, () -> {
+            if (failure != null) {
+                Throwable cause = failure instanceof java.util.concurrent.CompletionException && failure.getCause() != null
+                        ? failure.getCause() : failure;
+                sender.sendMessage("§cXP operation failed closed: " + (cause.getMessage() == null ? cause.getClass().getSimpleName() : cause.getMessage()));
+            } else sender.sendMessage((report.state() == com.infinitygear.mining.XpActivationService.State.CONFLICT
+                    || report.state() == com.infinitygear.mining.XpActivationService.State.DUPLICATED
+                    || report.state() == com.infinitygear.mining.XpActivationService.State.QUARANTINED
+                    || report.state() == com.infinitygear.mining.XpActivationService.State.MISSING
+                    || report.state() == com.infinitygear.mining.XpActivationService.State.STALE ? "§c" : "§a")
+                    + report.state() + ": §f" + report.detail());
+        }));
     }
 
     private void handleDuplicate(CommandSender sender, String label, String[] args) {
@@ -327,49 +397,60 @@ public class InfinityPickaxeCommand implements CommandExecutor, TabCompleter {
             switch (args[1].toLowerCase()) {
                 case "list" -> {
                     require(sender, "infinitypickaxes.admin.duplicates.view");
-                    List<DuplicateRecord> records = plugin.getDuplicateService().listRestricted();
-                    sender.sendMessage("§6Restricted tracked-item UUIDs: §f" + records.size());
-                    records.stream().limit(20).forEach(record -> sender.sendMessage(
-                            "§8- §f" + record.uuid() + " §7[§c" + record.status() + "§7] §8" + record.reason()));
+                    plugin.getDuplicateService().listRestrictedAsync().whenComplete((records, failure) ->
+                            Bukkit.getScheduler().runTask(plugin, () -> {
+                                if (duplicateFailure(sender, failure)) return;
+                                sender.sendMessage("§6Restricted tracked-item UUIDs: §f" + records.size());
+                                records.stream().limit(20).forEach(record -> sender.sendMessage(
+                                        "§8- §f" + record.uuid() + " §7[§c" + record.status() + "§7] §8" + record.reason()));
+                            }));
                 }
                 case "inspect" -> {
                     require(sender, "infinitypickaxes.admin.duplicates.view");
                     UUID uuid = requireUuid(args, 2);
-                    DuplicateRecord record = plugin.getDuplicateService().find(uuid).orElse(null);
-                    if (record == null) {
-                        sender.sendMessage("§aThat UUID has no duplicate restriction.");
-                    } else {
-                        sender.sendMessage("§6UUID: §f" + record.uuid());
-                        sender.sendMessage("§6Status: §f" + record.status());
-                        sender.sendMessage("§6Reason: §f" + record.reason());
-                        sender.sendMessage("§6Last update: §f" + record.lastUpdated());
-                        sender.sendMessage("§6Replacement: §f" + (record.replacementUuid() == null ? "none" : record.replacementUuid()));
-                    }
+                    plugin.getDuplicateService().findAsync(uuid).whenComplete((found, failure) ->
+                            Bukkit.getScheduler().runTask(plugin, () -> {
+                                if (duplicateFailure(sender, failure)) return;
+                                DuplicateRecord record = found.orElse(null);
+                                if (record == null) sender.sendMessage("§aThat UUID has no duplicate restriction.");
+                                else {
+                                    sender.sendMessage("§6UUID: §f" + record.uuid());
+                                    sender.sendMessage("§6Status: §f" + record.status());
+                                    sender.sendMessage("§6Reason: §f" + record.reason());
+                                    sender.sendMessage("§6Last update: §f" + record.lastUpdated());
+                                    sender.sendMessage("§6Replacement: §f" + (record.replacementUuid() == null ? "none" : record.replacementUuid()));
+                                }
+                            }));
                 }
                 case "scan" -> {
                     require(sender, "infinitypickaxes.admin.duplicates.scan");
-                    DuplicateScanResult result;
+                    java.util.concurrent.CompletableFuture<DuplicateScanResult> scan;
                     if (args.length >= 3 && !args[2].equalsIgnoreCase("online")) {
                         Player target = Bukkit.getPlayer(args[2]);
                         if (target == null) throw new IllegalArgumentException("Player is not online.");
-                        result = plugin.getDuplicateService().scanPlayer(target, sender.getName());
+                        scan = plugin.getDuplicateService().scanPlayerAsync(target, sender.getName());
                     } else {
-                        result = plugin.getDuplicateService().scanOnline(sender.getName());
+                        scan = plugin.getDuplicateService().scanOnlineAsync(sender.getName());
                     }
-                    sender.sendMessage("§aScanned §f" + result.itemsScanned() + "§a tracked items; detected §f"
-                            + result.duplicatesDetected().size() + "§a compromised UUID(s).");
+                    scan.whenComplete((result, failure) -> Bukkit.getScheduler().runTask(plugin, () -> {
+                        if (duplicateFailure(sender, failure)) return;
+                        sender.sendMessage("§aScanned §f" + result.itemsScanned() + "§a tracked items; detected §f"
+                                + result.duplicatesDetected().size() + "§a compromised UUID(s).");
+                    }));
                 }
                 case "quarantine" -> {
                     require(sender, "infinitypickaxes.admin.duplicates.quarantine");
                     UUID uuid = requireUuid(args, 2);
-                    plugin.getDuplicateService().quarantine(uuid, "Manual administrator quarantine", sender.getName());
-                    sender.sendMessage("§eQuarantined tracked UUID §f" + uuid);
+                    duplicateReply(sender, plugin.getDuplicateService().quarantineAsync(uuid,
+                            "Manual administrator quarantine", sender.getName()),
+                            "§eQuarantined tracked UUID §f" + uuid);
                 }
                 case "revoke" -> {
                     require(sender, "infinitypickaxes.admin.duplicates.resolve");
                     UUID uuid = requireUuid(args, 2);
-                    plugin.getDuplicateService().revoke(uuid, "Manual administrator revocation", sender.getName());
-                    sender.sendMessage("§cPermanently revoked tracked UUID §f" + uuid);
+                    duplicateReply(sender, plugin.getDuplicateService().revokeAsync(uuid,
+                            "Manual administrator revocation", sender.getName()),
+                            "§cPermanently revoked tracked UUID §f" + uuid);
                 }
                 case "resolve", "rekey-held" -> {
                     require(sender, "infinitypickaxes.admin.duplicates.resolve");
@@ -378,9 +459,12 @@ public class InfinityPickaxeCommand implements CommandExecutor, TabCompleter {
                             && (args.length < 3 || !args[2].equalsIgnoreCase("keep-held"))) {
                         throw new IllegalArgumentException("Use /" + label + " duplicate resolve keep-held while holding the canonical item.");
                     }
-                    UUID replacement = plugin.getDuplicateService().rekeyHeld(player);
-                    sender.sendMessage("§aThe held pickaxe is now canonical with UUID §f" + replacement
-                            + "§a. Its previous UUID is permanently revoked.");
+                    plugin.getDuplicateService().rekeyHeldAsync(player).whenComplete((replacement, failure) ->
+                            Bukkit.getScheduler().runTask(plugin, () -> {
+                                if (duplicateFailure(sender, failure)) return;
+                                sender.sendMessage("§aThe held item is now canonical with UUID §f" + replacement
+                                        + "§a. Its previous UUID is permanently revoked.");
+                            }));
                 }
                 default -> sender.sendMessage("§cUnknown duplicate subcommand.");
             }
@@ -389,6 +473,22 @@ public class InfinityPickaxeCommand implements CommandExecutor, TabCompleter {
         } catch (Exception exception) {
             sender.sendMessage("§c" + exception.getMessage());
         }
+    }
+
+    private void duplicateReply(CommandSender sender, java.util.concurrent.CompletableFuture<Void> future,
+                                String success) {
+        future.whenComplete((ignored, failure) -> Bukkit.getScheduler().runTask(plugin, () -> {
+            if (!duplicateFailure(sender, failure)) sender.sendMessage(success);
+        }));
+    }
+
+    private boolean duplicateFailure(CommandSender sender, Throwable failure) {
+        if (failure == null) return false;
+        Throwable cause = failure instanceof java.util.concurrent.CompletionException && failure.getCause() != null
+                ? failure.getCause() : failure;
+        sender.sendMessage("§cDuplicate authority operation failed closed: "
+                + (cause.getMessage() == null ? cause.getClass().getSimpleName() : cause.getMessage()));
+        return true;
     }
 
     private void require(CommandSender sender, String permission) {
@@ -514,7 +614,7 @@ public class InfinityPickaxeCommand implements CommandExecutor, TabCompleter {
             List<String> list = new ArrayList<>(gearCommand ? List.of() : Arrays.asList("menu", "gui"));
             if (hasAdmin(sender)) {
                 list.addAll(gearCommand
-                        ? Arrays.asList("give", "book", "artifact", "station", "reload", "setlevel", "addxp", "migration")
+                        ? Arrays.asList("give", "book", "artifact", "station", "reload", "setlevel", "addxp", "migration", "xp")
                         : Arrays.asList("give", "book", "reload", "setlevel", "addxp"));
                 list.add("duplicate");
             }
@@ -529,6 +629,13 @@ public class InfinityPickaxeCommand implements CommandExecutor, TabCompleter {
         }
         if (gearCommand && args.length == 2 && args[0].equalsIgnoreCase("station")) {
             return List.of("runic-table", "fusion-altar", "gear-forge", "bind", "unbind", "status");
+        }
+        if (gearCommand && args.length == 2 && args[0].equalsIgnoreCase("xp")) {
+            return List.of("adopt", "reconcile", "issues");
+        }
+        if (gearCommand && args.length == 3 && args[0].equalsIgnoreCase("xp") && args[1].equalsIgnoreCase("adopt")) {
+            return Bukkit.getOnlinePlayers().stream().map(Player::getName)
+                    .filter(name -> name.toLowerCase().startsWith(args[2].toLowerCase())).toList();
         }
         if (gearCommand && args.length == 3 && args[0].equalsIgnoreCase("station")
                 && args[1].equalsIgnoreCase("bind")) {

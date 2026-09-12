@@ -35,6 +35,9 @@ public class PickaxeManager {
      * Creates a brand new Infinity Pickaxe item stack.
      */
     public ItemStack createPickaxe(int startingLevel) {
+        if (plugin.getDuplicateService() != null && !plugin.getDuplicateService().authorityReady()) {
+            throw new IllegalStateException("Tracked-item authority is unavailable");
+        }
         FileConfiguration config = plugin.getConfigManager().getConfig();
         Material material = Material.matchMaterial(config.getString("settings.default-material", "NETHERITE_PICKAXE"));
         if (material == null) material = Material.NETHERITE_PICKAXE;
@@ -57,6 +60,7 @@ public class PickaxeManager {
      * Converts a vanilla pickaxe into an Infinity Pickaxe on the fly, preserving any existing enchantments.
      */
     public InfinityPickaxe convertVanillaPickaxe(ItemStack item, Player player) {
+        if (plugin.getDuplicateService() != null && !plugin.getDuplicateService().authorityReady()) return null;
         if (item == null || !isPickaxeMaterial(item.getType())) return null;
         if (PickaxeData.isInfinityPickaxe(item)) {
             if (plugin.getDuplicateService() != null && !plugin.getDuplicateService().isUsable(item)) return null;

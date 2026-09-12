@@ -1,0 +1,333 @@
+# Archives prerequisite contract, version 1
+
+## Task #7 single-server acceptance checkpoint (2026-09-12)
+
+This section supersedes current-status claims in older dated checkpoints below;
+their implementation history remains intact. The pinned Task #7 acceptance
+implementation source, InfinityGear `12d0986`, includes
+the narrow tracked no-replacement application participant plus configured
+`SINGLE_SERVER` deployment epochs, exact identity custody claims, a migration-13
+MariaDB quarantine authority and an explicit fail-closed SQLite importer.
+NoxwardArchives supplies only the approved operation-specific
+`BookApplicationService.PolicyAuthority`; it contains no Archive gameplay,
+reward logic or broader provenance policy.
+
+The exact Task #7 plugin artifact
+`0897c987c50b69ba7cecb7bad8ae39ddf588eee1a8b5fd4e0d2eceefe723d9fe`
+passed 342 automated tests and the clean disposable Paper 26.2 build 121 / Java
+25 application interruption, restart, conservation, rejection and native-storage
+matrix, recorded in
+[Task #7 clean acceptance](../../NoxwardArchive/docs/task-7-clean-acceptance-results.md).
+MariaDB 12.3.3 and JDBC 3.5.6 loaded through Paper's runtime library
+pipeline. The accepted initial topology is only `noxward-prison-01`;
+cross-server transfer/leases and Nexo are not supported. Production installation,
+reconfirming and backing up the real deployment SQLite DB/WAL/SHM set,
+import/freeze and capability enablement each remain separate Axel/Officer_Ray
+decisions. `book-application` defaults false and aggregate `book-lifecycle`
+remains false.
+
+The current InfinityGear head is `d68d7de`, a documentation-only descendant of
+the pinned acceptance implementation; it is not a replacement acceptance
+artifact.
+
+## Task #6 physical application checkpoint (2026-09-10)
+
+The first operation-specific physical participant now exists for the only
+mechanically unambiguous tracked-book route: applying one uniquely held,
+unstacked, non-quarantined Archive book to equipment with no existing matching
+enchantment or Archive attachment. The public `BookApplicationService` requires
+an independently registered production `PolicyAuthority`; DTO validity and test
+policies do not authorize production provenance decisions.
+
+The participant captures exact slots and item images on the server thread, uses
+operation-scoped custody markers and a deterministic source-slot escrow token,
+and advances the durable journal through custody, source removal, equipment
+mutation, finalization and acknowledgement. Recovery is by operation ID only.
+Migration 11 serializes active equipment/source claims, and concurrent mining,
+legacy progression and presentation writers refuse custody-marked equipment.
+
+Discovery reports `book-application` only while the migrated participant and an
+explicit policy authority are both live. Aggregate `book-lifecycle` remains
+false. Replacement, removal, transfer and fusion remain unavailable, and every
+legacy tracked-book route still rejects. Java 25 `test assemble` passed **332
+tests, zero skipped** against disposable MariaDB. This is a verified source
+checkpoint, not live Paper interruption or native serialization acceptance; no
+jar was installed and no deployment was performed.
+
+## Task #5 journal slice 2 (2026-09-10)
+
+Migration 10 and the blocking `MariaBookLifecycleTransaction` now implement the
+database-only lifecycle/attachment participant described by the contract slice.
+The migration persists the complete canonical request and normalized equipment,
+input, output-reservation and lineage records, including exact before/after item
+images, attachment revision, phase, policy decision, exact values and timestamps.
+
+Lifecycle operation IDs are claimed in the existing
+`infinitygear_book_operations` namespace, so issuance and the older transition
+ledger reject reuse in either direction. Preparation locks and validates exact
+unconsumed source identities/artifacts, values, output freshness and equipment
+attachment revision without retiring sources or modifying attachment lineage.
+Finalization repeats those locks and atomically retires tracked sources, writes
+the predeclared fresh book identities and canonical artifacts, replaces or clears
+enchantment-keyed attachment lineage, and advances the separate attachment
+revision exactly once.
+
+The journal recovers the same immutable request after repository recreation,
+rejects conflicting payloads, applies monotonic fingerprint-bound phase CAS, and
+persists the immediately preceding phase so only the identical committed CAS can
+be replayed. A different expected phase cannot recover merely because it names
+the same destination. The journal verifies unchanged durable before-state before
+recording `ABORTED` or `ROLLED_BACK`. A bounded retry handles MariaDB deadlocks
+only during pre-mutation
+preparation. An injected failure immediately before commit proves source,
+artifact, attachment, revision and phase writes roll back together.
+
+Java 25 `test assemble` passed **326 tests, zero skipped** against a dedicated
+disposable MariaDB schema, including 38 environment-gated MariaDB tests and eight
+new lifecycle tests. The migration was rerun and recovery used fresh repository
+instances. No physical inventory participant or lifecycle service is registered;
+`book-lifecycle` remains false and `ProvenancePolicy.unresolved()` remains the
+production default.
+
+## Task #5 contract slice 1 (2026-09-09)
+
+The implementation-free lifecycle DTOs, canonical fingerprint and durable phase
+contract were implemented and documented in
+[`book-lifecycle-contract.md`](book-lifecycle-contract.md). This slice adds no
+MariaDB lifecycle migration, Bukkit inventory participant, route wiring, policy
+authorization or capability. `book-lifecycle` remains false and
+`ProvenancePolicy.unresolved()` remains the production default. The journal work
+requested here is now fulfilled by slice 2 above; continue with the separately
+bounded physical participant described at the end of that document.
+
+## Task #4 closure update (2026-09-09)
+
+The dated mining checkpoints below are retained as implementation history. Their
+statements that the production receiver, durable consumer, migration-8 Paper
+acceptance, ordinary producer evidence, physical-return interruption, placement,
+reset, multiplayer or staff-alert gates remain open are superseded by the
+attended Task #3/#4 evidence in
+`/home/axl/Dev/NoxwardArchive/docs/live-mining-acceptance.md`.
+
+For one exact approved Paper 26.2 artifact/config/listener fingerprint, ordinary
+mining now has bounded live acceptance from one physical instance through XP
+receipt, credit, durable inbox and acknowledgement. The fixture finished at
+revision 5 / XP 9 / five blocks with exact 5/5/5/5 durable totals. Source and
+fixture defaults remain disabled and unapproved. AxMines now also requires the
+receiver service to be present on every capability query; service disappearance
+immediately removes ordinary support. The updated AxMines suite passes 65/65.
+InfinityGear's production implementation and installed artifact remain based on
+`16ae526`; its installed jar SHA-256 is
+`98d6d78514ad542bd2ada43718687e9282592700ea0c1d9d8e255dbaa9e94973`.
+
+Managed Blast/Dynamite/Vein, piston provenance, identical-material replacement,
+`setblock` and `breakNaturally` remain unsupported. No Archive gameplay reward
+was added. The next canonical surface is live book lifecycle: equipment
+attachment lineage plus crash-recoverable application, replacement, removal,
+transfer and fusion inventory participants. `book-lifecycle` remains false and
+`ProvenancePolicy.unresolved()` continues rejecting every unresolved product
+case. See `/home/axl/Dev/NoxwardArchive/docs/integration-handoff.md` for Task #5.
+
+## Durable credit delivery checkpoint (2026-09-08)
+
+The production `MiningAuthority.Receiver` is registered only after asynchronous
+MariaDB migration. It queues on the server thread, loads the explicit adoption
+and authoritative account off-thread, then rechecks the producer revision and
+the same recursive unique-custody rules used by XP activation before capturing
+an immutable progression plan. Stale account, profile, revision, custody,
+producer/reload, or shutdown state omits the award and records an incident when
+persistence remains available. Producer completions are never retried.
+
+Migration 9 adds `infinitygear_mining_consumer_inbox`, keyed uniquely by
+`credit_id` with the full immutable credit payload. The bounded startup and
+scheduled dispatcher acknowledges the receipt-gated outbox only after the inbox
+transaction commits. Identical replay returns accepted from the existing row;
+conflicting ID reuse rejects. `CreditedBlockEvent` is post-commit observation,
+not durable acknowledgement and not an Archive gameplay reward.
+
+`strict-mining` now becomes true only while the migrated database integration,
+completion receiver, XP participant, dispatcher, durable inbox, receiver service
+registration, and at least one producer-supported path are all live. Producer
+paths remain separately reported. The local fixture approves no path, so strict
+mining remains false pending attended player adoption and ordinary-path physical
+interruption acceptance.
+
+## Safe XP activation checkpoint (2026-09-08)
+
+Migration 8 adds explicit XP adoptions, administrative receipts, unresolved reconciliation records and deduplicated presentation claims. `/igear xp adopt <player>` requires exactly one visible, uniquely held, unstacked and non-quarantined EXPERIENCE item. It writes a fail-closed adoption marker on the server thread before scheduling database work. A committed adoption interrupted before revision-0 projection is finalized from its durable record on login, inventory load or restart; a marker with no committed adoption remains guarded and operator-visible and is never retried automatically.
+
+Committed mining and administrative receipts are projected strictly in revision order. Missing, duplicated, stale, quarantined or conflicting items create durable reconciliation records; `/igear xp reconcile <uuid>` only retries compare-and-set projection after custody is corrected and never overwrites a conflict. `/igear xp issues` lists unresolved records. Existing `addxp` and `setlevel` commands use atomic administrative receipts for adopted items, preserve mined count, and recover only a committed receipt after an uncertain response. Upward level presentation is claimed once per item revision after projection.
+
+Automatic adoption and strict mining remain disabled. Migration 8 does not register the production mining receiver, infer XP from attempts/AIR/world state, repair conflicts, provide cross-server custody, or resolve legacy ambiguous reservations. Statements in older dated checkpoints below that explicit adoption, lifecycle projection, administrative progression or item-state reconciliation are unavailable are historical and superseded by this section.
+
+## Approved confirmed-only / fail-closed checkpoint (2026-09-06)
+
+This section supersedes historical requirements below to recover every physical removal or persist intent before every break. The approved policy intentionally accepts rare lost rewards: uncertain physical completion or missing durable XP commit means no XP/count/progression/Archive reward, no downstream reward eligibility, no automatic retry or compensation. An ambiguous operation is voided and recorded when possible, optionally permission-alerted, and never automatically replayed. A committed receipt whose response was lost remains authoritative and recovers exactly once. MariaDB never supplies inferred physical-break evidence.
+
+Migration 7 adds `infinitygear_mining_attempts` as forensic metadata/submission tombstones alongside the existing mining credit/recovery ledger. The async XP worker persists a one-shot marker after trusted physical confirmation, then atomically commits XP, receipt, credit outbox and COMMITTED state. Account row locking and READ COMMITTED isolation serialize concurrent submissions and see the independent marker. If the transaction rolls back or no receipt exists after interruption, later calls cannot submit another award for that operation/instance. Receipt-only recovery classifies durable pending records as AMBIGUOUS/COMMIT_FAILED; absent pre-crash records cannot produce posthumous incidents. Contradictory durable voids before commit roll back the entire XP transaction. No synchronous per-block SQL, world scans, next-tick retries or reconciliation loops were added.
+
+`MiningXpParticipant.complete` gates every producer fact before XP; false/exceptional/unconfirmed outcomes only record incidents. Missing/conflicting items still defer absolute receipt projection. The dispatcher never retries XP and rejects unconfirmed/illegitimate payloads. Legacy RESERVED/RECOVERY_REQUIRED records remain forensic/unreplayable. Explicit unique-custody adoption, reconnect scheduling and ledger-aware admin progression are implemented by the migration-8 checkpoint above; automatic adoption and the production durable receiver remain unavailable.
+
+The ServicesManager `MiningIncidentService` becomes available after asynchronous MariaDB initialization. Immutable evidence captures operation/player/tool when known, mine/generation, world/position/original state, placement/producer facts, lifecycle/reason, timestamps, versions and configuration revision. Unknown external versions/configuration are labelled, not invented. The companion has no reward authority. Inspect via `MariaMiningJournal.incident/ incidents` or SQL; retain tombstones. No recovery/compensation admin command was added.
+
+Existing config/admin reload manages `mining-incidents.alerts.enabled: false`, configurable `permission: noxwardarchives.alerts.mining`, `interval-seconds: 60` and a message with `{count}`/`{operation}`. Alerts follow durable terminal persistence, are deduplicated and rate-limited/aggregated, and remain best effort. Offline staff, disabled notifications, restart or delivery errors cannot affect rewards or remove SQL evidence. Aggregates flush only on a later incident; there is no background scan or login replay. No player-facing messages are enabled.
+
+AxMines now registers an API-only `MiningEventOwner` so all prototype-owned original/replacement/reentrant events skip InfinityGear's legacy pre-removal XP, even for unmarked tools. The source prototype remains disabled by default. It adds conservative late state/placement and observed active-edit invalidation; uncertain/placed/unknown outcomes omit deferred mine accounting/rewards/thresholds. Unowned legacy mining retains legacy semantics, never strict credit. Diagnostic REMOVED still cannot enable strict credit: live protection/enchantment timing and unobservable external edits remain unverified. No Libreforge changes are assumed mandatory for normal Player.breakBlock; setblock and breakNaturally have no completion hooks and remain unsupported. Discovery separately reports normal, AoE and world-edit capability blockers. Bukkit events/AIR/generation/reset counters never provide fallback credit.
+
+Build both source repositories with Java 25; build InfinityGear's API jar first. AxMines uses a compile-only sibling API jar (override `-PinfinityGearApiJar=...`), never shades provider classes, and soft-depends on InfinityGear. Paper 26.2 remains the deployment runtime; MariaDB JDBC still loads via Paper libraries, not bundled server binaries. No Archives gameplay, provenance policy defaults, deployment, push or merge is included.
+
+The full live-server acceptance matrix remains in AxMines `docs/guarded-break-prototype.md`; source tests do not close it. See Archives `docs/durable-mining-recovery-protocol.md` for the superseding protocol and audit/notification semantics. Runtime book/Nexo serialization, MariaDB library loading, cross-server custody/quarantine and the explicit SQLite migration remain outstanding.
+
+The durable outbox now requires an XP receipt for both publication and acknowledgement, including older receipts predating migration 7. Legacy COMPLETED journal rows without receipts remain forensic and cannot produce downstream rewards. The callback-based MiningCoordinator rejects MariaMiningJournal before invoking any XP or notification callback; only the atomic XP participant can enter the durable path. Migrations 3/5/6/7 are now ordered together by the journal so receipt-only outbox inspection is safe after initialization.
+
+Checkpoint verification: Java 25 offline `test assemble` passed **293 tests, zero skipped**, including **25 disposable MariaDB tests**. AxMines passed **45 tests, zero skipped**, on Java 25. Added coverage includes simulated physical-removal/commit interruption, durable versus absent incident records, false/exceptional/mismatched producer facts, reset/edit/placement invalidation, lost committed response, rollback/no replay, concurrent contradictory void, receipt-required publication, staff permission/rate/offline/persistence ordering, and server-thread SQL exclusion. Existing adoption, receipt, projection, quarantine and legacy-write guard tests remain passing. Jar inspection found the Paper MariaDB library declaration and zero bundled MariaDB driver/server entries; AxMines contains no shaded InfinityGear API or eco classes. Tested source was prepared in `/tmp/mining-fail-closed.RCYBh6` before applying the reviewed patch to the clean source repositories. These are boundary simulations and disposable DB tests, not live-server crash/acceptance evidence.
+
+## User-reported development compatibility pass
+
+Following the AxMines startup-version fix, the user reports normal behavior with the guarded prototype both disabled and enabled on their development server: placed-block testing, protected blocks remaining unbreakable, XP/drops, AoE, Vein Miner, mine operation/resets, and a clean restart all passed manual checks. Pickaxes are unbreakable, so durability was inapplicable. This is user-reported smoke/compatibility evidence, not agent-observed listener traces, quantified exactly-once accounting, or certification of all acceptance cases.
+
+Forced-crash recovery remains untested. Detailed overlapping-attempt counts, precise reset interleavings, reward accounting and adversarial cancellation/listener ordering remain unverified. The source flag stays disabled by default. No strict mining credit, live book lifecycle, or production activation is authorized. Local XP adoption/custody and receipt projection are implemented by migration 8; continue with the durable production receiver and keep unresolved provenance policies rejecting transitions. Full evidence and limitations are in AxMines' `docs/guarded-break-prototype.md`.
+
+## Current local checkpoint (2026-09-06)
+
+This checkpoint includes the async mining dispatcher, read-only recovery inspection, migration 6 XP accounts/receipts, captured progression plans, async receipt projection/recovery, and guards against legacy progression writes on explicitly managed items. These are local prerequisites, not production activation. Strict mining and live book lifecycle remain unavailable. No items are automatically enrolled, no server binaries were replaced by the agent, and no Archives gameplay was implemented.
+
+Verification for the code in this checkpoint: Java 25 offline `test assemble` passed 269 tests with zero skipped, including 17 tests exercising disposable MariaDB 12.3.3. The applied source matches the tested isolated checkout. The disposable database was stopped. The sections below retain earlier implementation/verification history; this checkpoint and the latest XP section describe the current state.
+
+Remaining work, in implementation order:
+
+1. Validate and harden actual-success production for normal mining and nested AoE. The user approved an AxMines-owned guarded Player.breakBlock prototype, now present in local AxMines source behind `archives-prototype.guarded-breaks: false`. It intercepts at LOWEST, runs one guarded replacement, rejects recursive active-position attempts, captures original state/generation/placement and checks API return plus final AIR. AxMines reward/accounting/reset actions are deferred until guarded ancestors return. It emits diagnostic observations only, not credits. The cancelled original remains observable and its caller returns false even after replacement success; protection/enchantment transparency is NOT established. See `/home/axl/Dev/AxMines/docs/guarded-break-prototype.md` for exact timing and the incomplete real-server gate. Persist attempt/completion evidence across the physical-removal-to-XP-commit crash window. Resolve placement, movement, reset and external-edit attribution. Direct setblock/breakNaturally remain unsupported for strict credits.
+2. Safe XP activation is implemented for explicit local custody: adoption fencing, reconnect/restart receipt projection, durable conflicting-item reconciliation, ledger-aware administration and deduplicated level-up presentation. Automatic adoption remains disabled, and unresolved legacy reservations remain forensic only.
+3. Wire producer, XP participant and dispatcher through bootstrap with accurate capability checks. Provide a durable receiving adapter and consumer deduplication before acknowledgement. Bukkit event dispatch alone is not durable handoff.
+4. Complete equipment attachment lineage and recoverable book application/removal/transfer transactions. Keep unequal-value fusion, mixed sources, replacement, removal and bulk allocation rejected until explicit product policies exist.
+5. Implement cross-server custody/transfer and quarantine synchronization. Existing SQLite quarantine has not been migrated.
+6. Validate on Java 25/Paper 26.2 with the pinned AxMines/EcoEnchants/Nexo stack: runtime MariaDB library loading, successful/denied/nested breaks, regeneration, placement/pistons, crash/disconnect/restart recovery and native item serialization.
+
+InfinityGear's committed XP checkpoint is `9eea284`. AxMines' disabled-by-default guarded-break prototype and startup fix extend checkpoint `d41b1ac`. Its verified upstream source baseline is unchanged. Prototype verification: Java 25 `test assemble`, 41 tests passed, zero skipped (24 mocked event-chain cases, four generation cases and 13 update-check startup cases). User-reported development-server compatibility evidence is summarized above; no instrumented exactly-once or crash-recovery evidence is claimed. No strict-mining capability, XP activation, public credit delivery, push or deployment is enabled by this prototype.
+
+## Historical audit and implementation decisions
+
+Baseline already matches Java 25 and Paper 26.2 (`26.2.build.112-stable`). Keep existing service consumers compatible; publish a separate `com.infinitygear.api.v1` surface containing only public immutable DTOs, Java and Bukkit types. No Archives gameplay belongs here.
+
+Mining currently funnels through `BlockBreakListener.onBlockBreak` at MONITOR into `LevelManager.addXp`. The other caller is the legacy admin add-XP command; the newer gear admin command writes gear XP directly. `addXp` currently increments mined counts even for admin XP. Separate the mined-count operation from generic XP. `PickaxeLevelUpEvent` is not a credit event.
+
+The locally inspected libreforge 2026.33 shared `MineBlockEffect.breakBlocksSafely` calls `Player.breakBlock` normally, sets AIR for `effects.use-setblock-break`, and calls `breakNaturally` for `prevent_trigger`. Current local configuration disables both flags. Blast Mining uses mine_radius (excluding original), Dynamite uses mine_radius plus break_block, and Vein Miner uses mine_vein including the original. Libreforge dispatches at HIGH; InfinityGear at MONITOR can observe both nested and outer events for the original. Its old placement check removes an LRU marker; nested checks, restart and eviction lose provenance. eco's existing chunk-PDC `BlockUtils.isPlayerPlaced` is preferable to a competing placement ledger, but its lifecycle/reset behavior is not an authoritative generation contract.
+
+The required optional provider must supply a stable physical-instance ID before effects, placement legitimacy, source attribution and successful-break confirmation. It must distinguish a reset block at the same coordinates, including same-tick resets. Bukkit events alone cannot prove physical success or distinguish a replacement identical to the original. No timestamp/coordinate blacklist can satisfy that contract. Missing provider means strict credits are unavailable, never guessed. The normal XP adapter may retain legacy behavior without claiming strict notifications. setblock/natural-break paths require explicit completion from that provider; third-party binaries will not be patched.
+
+Books: `CanonicalBookFactory` intentionally discards arbitrary PDC. Pair and bulk fusion generate fresh canonical outputs in previews. `EnchantmentItemTransforms` clones for removal and creates a new book for transfer. Service application consumes the book and stores enchantments without lineage. Existing stations have no durable external-operation journal. Therefore previews must not commit provenance transitions, and tracked items must not enter these legacy mutation paths until a transaction-aware lifecycle is available.
+
+Policies needing product input: unequal Archive source values, mixed ordinary/Archive fusion, replacement value disposition, removal versus destruction, and bulk allocation of source values to outputs. The default policy rejects unresolved transitions. A configured policy returns exact output values; the ledger validates conservation, source retirement and no value minted from ordinary inputs. A mixed operation cannot upgrade ordinary value into Archive value. This policy is separate from Archives grade/category/rarity rules.
+
+Persistence: legacy duplicate quarantine uses local SQLite and unprefixed tables in its own file; station bindings use their existing file store. Keep those systems untouched in this focused change. New integration state uses MariaDB-owned `infinitygear_*` tables and numbered migrations, exact DECIMAL values, stable external operation/reward IDs and unique UUIDs. No other plugin modifies these tables. Bootstrap supplies connection details only. MariaDB driver is resolved by Paper `libraries`, never shaded. Automatic migration of existing SQLite quarantine data is a separate deployment operation, not silently performed.
+
+Issuance returns a recoverable representation, not permission to insert another physical copy on each retry. Delivery must use a claim/transfer protocol in the caller's journal. A UUID alone cannot prevent cloning; ledger validation and duplicate quarantine remain required. Database and Bukkit inventory do not share one transaction. No crash-safe inventory mutation claim is made until participant recovery is implemented.
+
+## Review steps
+
+1. This audit and policy/integration boundaries.
+2. Versioned discovery and capability API, independent API jar.
+3. Runtime MariaDB dependency and owned migrations/repositories.
+4. Idempotent issuance and provenance ledger; legacy mutation guards.
+5. Canonical credit state machine, immutable notification and normal XP fixes.
+6. Tests and explicit readiness/blocker report.
+
+## Implemented surface and readiness
+
+| Area | Implemented | Activation/remaining work |
+| --- | --- | --- |
+| Discovery | `ArchiveIntegrationService` registered through ServicesManager, immutable DTOs, content revision per requested gear level, native caps/targets/conflicts, effective policy and disabled-profile visibility | Consumers poll the revision on the server thread. Active native metadata needs an actual Paper/EcoEnchants runtime test. |
+| API artifact | `archivesApiJar`, classifier `archives-api-v1`, contains only `com.infinitygear.api.v1` | Compile-only consumer dependency; provider owns runtime classes. Existing service remains compatible. Treat these new contracts as prerelease until the remaining provider decisions are resolved. |
+| Issuance | `BookIssuanceService`, canonical tracked book, MariaDB operation/reward uniqueness, immutable receipts, provenance-authority validation, persisted source values, ledger-based validation | `database.yml` must enable MariaDB and an external `ProvenanceAuthority` must register. Returned bytes are recovery data, not repeat-delivery permission. Driver `org.mariadb.jdbc:mariadb-java-client:3.5.6` loads through Paper libraries. |
+| Deduplication | `ARCHIVE_BOOK` uses existing tracked UUID/scanner facility; malformed/consumed ledger identities reject | Existing quarantine store remains local SQLite. Cross-server physical custody and cross-server quarantine synchronization are not yet implemented. |
+| Lifecycle | Transactional MariaDB source retirement, exact-value conservation, grouped parent lineage, fresh output UUIDs, operation fingerprint/replay, explicit policy interface | This is a ledger participant, **not** live inventory application/removal/transfer. Service capability remains unavailable. Legacy mutation routes reject marked books before consumption. |
+| Normal XP | LOWEST material/placement snapshot, AIR checks at MONITOR, original-material XP lookup, mining count separated from admin XP | Fixes the traced nested Vein original/AIR path. This still follows legacy event acceptance, not authoritative physical completion. It emits no strict mining notification. |
+| Durable XP participant | Opt-in MariaDB XP accounts, explicit unique-custody adoption fencing, atomic mining/admin receipts, revision-ordered lifecycle projection, durable reconciliation, deduplicated level-up presentation and legacy-write guards | Automatic adoption remains disabled. Requires true producer completion, cross-server custody work and real-server validation. Existing ambiguous legacy reservations cannot be assumed unpaid. |
+| Placement | Removed InfinityGear's destructive, evicting LRU; delegates read-only to eco chunk PDC | eco owns placement/movement/cleanup. Existing `anti-exploit.prevent-placed-blocks` and `placed-blocks-cache-size` no longer control this adapter. Reset cleanup and physical-generation identity still need provider integration. |
+| Strict mining | `MiningAuthority` boundary, begin/complete coordinator, durable MariaDB instance reservation/recovery state, immutable non-cancellable `CreditedBlockEvent` | **Not wired to raw event dispatch or registered as an available strict capability.** Requires actual-success/reset authority plus async XP/journal participant recovery. No post-credit event is emitted in production yet. |
+
+### Explicit blockers and product decisions
+
+1. A supported producer must report actual successful break completion and durable block-instance/reset identities, including two identical regenerations at one location in one tick. `MiningAuthority` names this boundary. The confirmed initial scope targets AxMines 1.8.0 and libreforge's normal Player.breakBlock path. Direct setblock and breakNaturally modes are unsupported for strict credit until explicit producer hooks exist; changes to libreforge are not assumed mandatory for normal mode. No binary patches or inferred credit from explosions have been added. Strict capability remains unavailable until its normal-mode completion and recovery participants are implemented and validated; changing bypass flags cannot silently enable it.
+2. MariaDB commit and Bukkit inventory saves are not a single transaction. The opt-in XP participant commits database XP and mining/admin receipts atomically; explicit adoption fencing and scheduled revision-ordered projection recover committed receipts after reconnect/restart. Physical conflicts are recorded for operator reconciliation without overwrite. Legacy-ambiguity compensation and durable mining-consumer handoff remain unwired. Do not invoke blocking JDBC methods on the server thread. Unmarked legacy items still receive XP from accepted events; this is explicitly not the new guarantee.
+3. A provenance policy must decide unequal-value fusion, mixed sources, replacement disposition, removal/destruction and bulk output allocation. `ProvenancePolicy.unresolved()` rejects all such operations. Test policies do not establish product defaults. The ledger currently accepts registered Archive source book IDs only; ordinary items are not assigned value or admitted as counterfeit ledger sources.
+4. Application needs enchantment-associated attachment lineage on equipment, and removal/transfer need the corresponding recoverable inventory transaction. Those are not implemented by the book-output transition ledger. Its generic operation enum is a contract proposal, not evidence of those adapters working. No live lifecycle capability is exposed until these participants exist. Ordinary non-Archive book behavior is unchanged.
+5. MariaDB runtime library resolution must be exercised on the target Paper deployment; local integration tests use the same driver as a test-only dependency. A real Paper/EcoEnchants fixture is still required for native book serialization/Nexo replacement, authoritative AoE completion, piston/reset event behavior and full crash/disconnect recovery. Local mocks only verify the adapter boundaries, not third-party implementations.
+
+### Verification and reproducibility
+
+Run `JAVA_HOME=<Java 25> ./gradlew test assemble`. MariaDB tests require `INFINITYGEAR_TEST_JDBC_URL` pointing at a **disposable** database, with local test credentials `igear_test` / `igear_test`; absent URL explicitly skips those tests. They never read the plugin's database.yml. Tests create owned schema tables but do not delete deployment data.
+
+MariaDB coverage includes concurrent issuance/retries, differing-payload rejection, separate reward UUIDs, policy rejection without retirement, pair/bulk source retirement, exact decimal conservation, rollback on inflation, replay across repository instances, operation-ID namespace conflicts, durable mining instance deduplication and a new generation at identical coordinates.
+
+Unit coverage includes coordinator normal/AoE labels, repeated/nested instance completion, rejected/placed/failed/AIR inputs, ambiguous XP recovery, non-cancellable notifications, same-position generation changes, the concrete legacy nested Vein/AIR path, immutable placement snapshots, non-destructive authority delegation, public DTO isolation/defensive copies, profile revisions and missing native entries, service registration, unresolved policy rejection and guards on legacy tracked-book mutation. Source labels in coordinator tests are not live Libreforge reproductions.
+
+Verified 2026-09-05: Java 25 `test assemble` passed all 226 tests, zero skipped, including four MariaDB integration tests against an isolated local MariaDB 12.3.3 instance using driver 3.5.6. Both the plugin and API jars built. Jar inspection confirmed the Paper libraries declaration and no MariaDB driver classes or MariaDB server binaries in the shaded plugin. Real-server verification and remaining capability blockers above are still outstanding; this is not a declaration that Archives can start consuming strict credits or live book lifecycle mutations.
+
+## Recovery continuation after baafbd5
+
+Issuance now persists the canonical serialized item itself in the owned `infinitygear_book_artifacts` table (restart-safe migration 4). The first committed artifact wins across concurrent writers. Retries retrieve the identical bytes and original UUID; they do not recreate presentation or depend on the native metadata/provenance provider when an artifact already exists. A conflicting request or consumed identity still rejects. This remains recovery data, not another inventory delivery grant.
+
+If interruption occurred after identity issuance but before artifact persistence, recovery materializes that same identity once native integration is available, then saves the artifact before returning. New issuance still requires enabled/native-level validation and an approving provenance authority. Existing saved artifacts can be recovered without that authority; `book-recovery` and `book-issuance` report this distinction.
+
+`IntegrationTasks` tracks both database tasks and scheduled server callbacks. Disable completes outstanding calls exceptionally, skips queued callbacks and stops the worker. An already running database operation may have committed before shutdown; callers recover via the same operation/reward IDs rather than assume that exceptional completion proves rollback. No off-thread Bukkit item creation was introduced.
+
+Verification: all 234 tests passed with zero skipped, including five tests against disposable MariaDB 12.3.3. Added coverage exercises provider-outage recovery, unfinished-artifact recovery, mismatched/consumed identity rejection, first-writer byte persistence across concurrent database connections and repository restart, and queued-task/scheduler shutdown. Serialized test bytes exercise durable storage; real Paper/Nexo item serialization remains an explicit runtime verification requirement. Fusion/replacement policy decisions and the other strict-mining/live-lifecycle blockers above remain outstanding.
+
+## Mining notification outbox continuation
+
+Completed mining journal rows now act as the durable outbox, so completion and notification eligibility share one database commit. Migration 5 adds `infinitygear_mining_notifications` for durable acknowledgements. `pendingNotifications(limit)` returns immutable batches with the original credit/instance IDs and attribution. Reserved or recovery-required XP rows cannot be read as pending notifications or acknowledged. Completion still does not prove crash-safe XP persistence; the missing XP participant must resolve that boundary before production activation.
+
+The coordinator acknowledges only after its notification callback returns. Callback failure, acknowledgement failure or a crash before acknowledgement leaves the completed credit available for replay, without making its XP eligible again. Database reads do not claim a credit, so concurrent readers and restarts may return the same credit; consumers must durably deduplicate by `creditId`. Acknowledgements are idempotent. Existing completed rows without acknowledgements are also replay candidates, because their previous delivery cannot be proved.
+
+This repository capability is not an available strict-mining service. An internal async dispatcher now reads/acknowledges off-thread and invokes its receiver on the server thread (see continuation below), but is not registered or scheduled in production. Bukkit event dispatch returning is not proof of durable consumer acceptance (including listener exceptions caught by Bukkit); reliable consumer handoff/reconciliation is still required before using an acknowledgement to promise end-to-end delivery. No raw mining listeners, XP adapters or bootstrap registration were enabled. No live Paper/EcoEnchants validation is claimed.
+
+Verification: Java 25 offline `test assemble` passed 239 tests, zero skipped, including eight disposable MariaDB integration tests. New coverage verifies exact notification replay after repository restart, exclusion of ambiguous XP, acknowledgement eligibility/idempotence, successful callback acknowledgement, and no XP retry after acknowledgement failure. The existing issuance-recovery changes remain uncommitted and preserved; no product provenance policy was selected.
+
+## Confirmed AxMines scope and source verification
+
+The user confirmed AxMines 1.8.0 as the reset provider and authorized source modifications. Its local deployment jar has SHA-256 `5cf6091ddd3b1347f387c8e3ce92a8c0a1ada059fe50679a5e70d66377ff0890`. All 41 AxMines-owned classes match a clean upstream build of `587ee574f924f6105f544572a2ae2f3321ea09a9` byte-for-byte. That version-bump commit and its parent `07e3db5fa39b48e75bcb05800921807444fd92f3` share identical source; the class match cannot distinguish which built the original jar. The embedded 1.7.0 does not contradict the verified runtime source match. The build's missing processResources version input was reproduced and fixed in the development source, without modifying the deployed binary.
+
+Source and detailed evidence now reside in `/home/axl/Dev/AxMines`, with `docs/archives-generation-readiness.md` recording the verification. The uncommitted source patch registers a ServicesManager reset-generation query with immutable public DTOs. A reset invalidates the old generation before filling, and publishes a new UUID after the fill callback. Failure/reload/disable and superseded callbacks leave generation unavailable. Four tracker unit tests and the source build pass. This is not a durable physical-instance/break-success authority, has no live-server acceptance evidence, and is not consumed by InfinityGear yet. No strict credits are enabled.
+
+Policy decisions are intentionally deferred rather than blocking implementation of independent participants. Unequal-value fusion, mixed Archive/ordinary inputs, replacement, removal and bulk allocation continue to use `ProvenancePolicy.unresolved()` and reject unresolved transitions. Existing ledger and policy tests do not choose production behavior. All InfinityGear recovery/outbox changes remain preserved and uncommitted; no Archives implementation or deployment was performed.
+
+## Async mining notification transport (2026-09-06)
+
+The preceding work was committed at the user's requested checkpoint: InfinityGear `6916ed4`, AxMines `d41b1ac`. The following continuation is separate from that checkpoint.
+
+`MiningNotificationDispatcher` now provides an internal transport over the MariaDB outbox, using `IntegrationTasks` for worker reads/acknowledgements and server-thread receiver invocation. Its receiver must return promptly with an asynchronous acceptance stage; only explicit `true` after durable, credit-ID-deduplicated acceptance permits acknowledgement. Merely firing a Bukkit event does not satisfy this contract. There is no XP callback in replay transport.
+
+Overlapping polls share one bounded batch; cancelling one caller's view does not cancel the shared delivery. Failure or deferral retains a credit and allows later entries in that batch to proceed. The caller supplies a positive acceptance timeout: a timed-out receiver can still commit later, so replay must deduplicate that late commit. Timeout does not cancel or modify the receiver's own stage. A failed acknowledgement likewise leaves the original credit available for replay. Read failures fail the poll; per-credit failures return credit IDs in its immutable batch result. Poison entries may continue occupying batches until consumer/operator recovery; this transport never discards them or claims fair progress across an arbitrarily large failing backlog.
+
+Close the dispatcher before its shared IntegrationTasks. Close fails pending callers, skips queued receiver/acknowledgement work and rejects further polls, including while an external acceptance stage is unresolved. An already-running database acknowledgement or receiver commit can still finish; exceptional completion is not rollback evidence.
+
+This dispatcher is deliberately not registered or scheduled by bootstrap. It requires a real durable receiver, authoritative physical-break completion and a reconciled XP participant before production activation. AxMines generation snapshots alone are insufficient, and no existing legacy mining path was enabled for strict credit. The single outbox acknowledgement represents one durable receiving adapter; it is not a per-subscriber delivery guarantee for arbitrary Bukkit listeners.
+
+Verification: Java 25 offline `test assemble` passed 241 tests; eight MariaDB integration tests were explicitly skipped because no disposable database URL was supplied. All ten new dispatcher tests passed, covering asynchronous acceptance, executor separation, failure/deferral, acknowledgement replay, overlapping/cancelled polls, queued and pending shutdown, bounded batches, read retry and late acceptance after timeout. SQL and schema are unchanged; the previously recorded eight-database-test run remains the last MariaDB verification. These checks do not establish real Paper/EcoEnchants runtime readiness. No new provenance policy, Archives implementation, deployment or commit was added by this continuation.
+
+## Read-only mining recovery inspection (2026-09-06)
+
+`MariaMiningJournal.find(instanceId)` now retrieves immutable attribution and explicit RESERVED, RECOVERY_REQUIRED or COMPLETED state. `pendingRecovery(afterInstanceId, limit)` enumerates interrupted/ambiguous records in bounded pages, excluding completed credits. The exclusive cursor is the physical instance UUID, ordered as canonical UUID text using the database's ascii_bin collation, not Java's signed UUID ordering or a creation timestamp. The existing outbox and inspection paths share one attribution decoder. No schema or state-transition changes were needed.
+
+Inspection never claims a record, changes state, invokes XP or enables notification delivery. RESERVED can also mean a currently running operation; neither elapsed time nor listing a record establishes that XP failed. Scans are live rather than snapshots: changes before a cursor require another pass from the beginning. These are internal blocking JDBC methods and must run on the worker executor. No public recovery service or admin command was registered.
+
+Verification: the complete Java 25 offline `test assemble` run passed 252 tests, zero skipped, against disposable MariaDB 12.3.3. Ten tests exercised MariaDB, including the two new restart/inspection and keyset-pagination cases; another new test checks invalid arguments without opening a connection. This run also includes all ten dispatcher tests and supersedes the previous database-skipped verification. The source was prepared in `/tmp/infinitygear-recovery-inspection.siDDpk` from the actual worktree, preserving the uncommitted dispatcher continuation.
+
+At this historical inspection-only checkpoint, XP reconciliation was unavailable because the journal did not yet store a durable intended XP delta/configuration snapshot or application receipt. Migration 8 now provides receipt-only item projection and physical-state reconciliation for adopted accounts; it still never interprets generic completed/ambiguous rows as XP evidence. A real successful-break producer remains required before strict-credit activation. Unresolved provenance policies still reject; no Archives gameplay was implemented.
+
+## Opt-in durable XP participant (2026-09-06)
+
+The following supersedes the preceding inspection-only limitation for newly adopted XP accounts; it does not reinterpret old journal reservations. Migration 6 adds owned `infinitygear_xp_accounts` and `infinitygear_mining_xp_receipts` tables. Adoption is an explicit internal operation, with no automatic import of player items. Once adopted, MariaDB is the authority and item XP is a projection. Reinitializing an existing account returns its current authoritative state rather than resetting it from an item snapshot.
+
+`MiningXpPlan` captures the account revision, prior level/XP/mined count, awarded amount and immutable level-cost table. The versioned persisted payload preserves retry behavior across configuration reloads. It validates finite positive amounts/costs, bounds, overflow and serialized format. Calculation retains the legacy maximum-level behavior: no additional XP at maximum level, but exactly one mined-block increment. XP remains IEEE double to match existing progression; Archive source-value decimals are unchanged.
+
+`MariaMiningXpLedger.apply` locks the account and atomically commits updated XP/count/revision, a recoverable receipt and the completed mining-credit row in one MariaDB transaction. Identical retries return the saved result; conflicting payloads, stale account revisions, existing physical-instance reservations and missing adoption reject without another award. The account's latest state remains intact when an older receipt is recovered. Receipts can be retrieved by credit ID or by account/revision, allowing sequential projection after an item-save rollback. Existing RESERVED/RECOVERY_REQUIRED legacy operations have no corresponding XP evidence and still require separate reconciliation; their mere existence never authorizes a new award.
+
+`MiningXpParticipant` runs the commit on IntegrationTasks' worker and resolves/projects the item on the server thread. `MiningXpItemProjection` compares expected revision, identity and both progression namespaces, then writes the absolute result and new revision in one ItemMeta assignment. It never adds XP during replay. A missing item, later revision, quarantine, malformed revision or conflicting legacy/admin edit prevents projection. Repeating an already-applied receipt is a no-op; reloading the matching before-state can restore the same receipt. The caller must establish unique live item custody. A metadata assignment is not a durable player save; the DB receipt remains the recovery authority.
+
+Marked items cannot receive legacy BlockBreakListener XP or LevelManager additive XP. Legacy/new gear persistence reject changed managed progression while allowing unrelated metadata saves with unchanged progression. Migration 8 routes both admin command families through ledger-aware `addxp`/`setlevel` receipts for adopted items. Ordinary unmarked items retain their existing progression behavior. No item is adopted automatically. The explicit adoption command writes its guard marker before database work and finalizes revision 0 only for the same unique custody/token/baseline; this does not solve cross-server custody.
+
+Verification: Java 25 offline `test assemble` passed 269 tests, zero skipped, against disposable MariaDB 12.3.3. Seven new database tests cover concurrent identical requests, stale/conflicting requests, old-receipt recovery after later progress, legacy ambiguous-reservation rejection, transaction rollback, a committed transaction whose response is lost, and async projection when an item is absent. Unit tests cover captured cost tables, maximum level, overflow/corrupt payloads, mirrored metadata, save rollback, conflicting/replayed revisions, server-thread enforcement and common persistence guards. There are 17 tests exercising MariaDB in this run. Mocked metadata/executors do not establish Paper/Nexo save or lifecycle compatibility.
+
+Strict-mining production remains disabled. Explicit local custody adoption, reconnect/restart projection, reconciliation records, ledger-aware administration and deduplicated presentation are implemented by migration 8; real Paper process-restart/inventory-save acceptance remains open. Required mining work still includes the production completion-to-XP receiver and durable consumer handoff. Existing raw BlockBreakEvents and generation snapshots alone are not treated as success evidence. Direct setblock/breakNaturally strict modes remain unsupported. All provenance product policies remain unresolved; no Archives gameplay or deployment was added.

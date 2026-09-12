@@ -1,0 +1,19 @@
+# Connection/bootstrap only. Existing SQLite quarantine data is not silently migrated.
+enabled: false
+# Required when enabled. Task #7 initially permits exactly one owning backend.
+# A different ID sharing the same database fails closed; transfer is unsupported.
+server-id: ''
+url: 'jdbc:mariadb://localhost:3306/noxward?connectTimeout=5000&socketTimeout=10000'
+username: ''
+password: ''
+
+# Explicit authority cutover. Keep sqlite until the offline import has been approved and completed.
+# mariadb never opens or writes duplicates.db and remains fail-closed until the exact import below verifies.
+quarantine-authority: 'sqlite'
+quarantine-approved-import-source-id: ''
+
+# Bounded receipt-gated credit delivery. Failed/deferred rows remain in the outbox.
+mining-delivery:
+  batch-size: 100
+  interval-ticks: 100
+  acceptance-timeout-millis: 5000

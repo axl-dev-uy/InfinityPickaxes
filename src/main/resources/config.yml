@@ -9,6 +9,16 @@ config-version: "2.0.0"
 # Default: "en" (English). Set to "es" for Spanish.
 language: "en"
 
+# Forensic mining alerts; reloaded through the existing configuration/admin reload.
+# Incidents remain in MariaDB even with alerts disabled or no staff online.
+# No player-facing notices, retries or compensation are performed.
+mining-incidents:
+  alerts:
+    enabled: false
+    permission: "noxwardarchives.alerts.mining"
+    interval-seconds: 60
+    message: "[Mining] {count} voided operation(s). Latest: {operation}. Inspect the mining incident ledger."
+
 # General settings
 settings:
   # Base pickaxe item material (e.g. NETHERITE_PICKAXE, DIAMOND_PICKAXE)

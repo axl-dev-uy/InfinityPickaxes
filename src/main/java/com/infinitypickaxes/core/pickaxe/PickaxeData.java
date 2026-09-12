@@ -104,6 +104,10 @@ public final class PickaxeData {
      */
     public static void saveToItemStack(InfinityPickaxe pickaxe, ItemStack item) {
         if (item == null || pickaxe == null) return;
+        if (com.infinitygear.integration.BookLifecycleItems.hasCustodyMarker(item)) {
+            throw new IllegalStateException("Book lifecycle custody forbids concurrent pickaxe mutation");
+        }
+        com.infinitygear.mining.MiningXpItemProjection.requireUnchangedProgress(item, pickaxe.getLevel(), pickaxe.getXp(), pickaxe.getBlocksMined());
 
         ItemMeta meta = item.getItemMeta();
         if (meta == null) return;

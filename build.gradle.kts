@@ -1,3 +1,5 @@
+import java.util.jar.JarFile
+
 plugins {
     java
     id("com.gradleup.shadow") version "9.3.1"
@@ -43,6 +45,7 @@ dependencies {
     testRuntimeOnly("com.willfp:libreforge:2026.33:shadow") { isTransitive = false }
     testRuntimeOnly("org.jetbrains.kotlin:kotlin-stdlib:2.3.21")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+    testRuntimeOnly("org.mariadb.jdbc:mariadb-java-client:3.5.6")
 }
 
 java {
@@ -62,6 +65,7 @@ tasks.processResources {
 
 tasks.test {
     useJUnitPlatform()
+    inputs.property("mariadbIntegrationEnabled", providers.environmentVariable("INFINITYGEAR_TEST_JDBC_URL").map { it.isNotBlank() }.orElse(false))
     jvmArgs("-javaagent:${mockitoAgent.asPath}")
 }
 
@@ -84,4 +88,39 @@ tasks.jar {
 
 tasks.assemble {
     dependsOn(tasks.shadowJar)
+}
+
+// Consumers compile against this artifact; only the provider loads these classes at runtime.
+val archivesApiJar = tasks.register<Jar>("archivesApiJar") {
+    archiveClassifier = "archives-api-v1"
+    from(sourceSets.main.get().output) { include("com/infinitygear/api/v1/**") }
+}
+tasks.assemble { dependsOn(archivesApiJar) }
+
+val verifyArchivesApiJar = tasks.register("verifyArchivesApiJar") {
+    group = "verification"
+    description = "Verifies that the published Archives consumer jar contains only the versioned API namespace"
+    dependsOn(archivesApiJar)
+    doLast {
+        val entries = mutableListOf<String>()
+        JarFile(archivesApiJar.get().archiveFile.get().asFile).use { jar ->
+            val iterator = jar.entries()
+            while (iterator.hasMoreElements()) entries += iterator.nextElement().name
+        }
+        check(entries.all { it.endsWith("/") || it.startsWith("META-INF/") || it.startsWith("com/infinitygear/api/v1/") }) {
+            "archives-api-v1 contains a non-versioned API entry: " + entries
+                .first { !it.endsWith("/") && !it.startsWith("META-INF/") && !it.startsWith("com/infinitygear/api/v1/") }
+        }
+        check("com/infinitygear/api/InfinityGearService.class" !in entries) {
+            "archives-api-v1 must not publish the in-plugin InfinityGearService compatibility interface"
+        }
+    }
+}
+tasks.check { dependsOn(verifyArchivesApiJar) }
+
+tasks.register<JavaExec>("quarantineMigration") {
+    group = "verification"
+    description = "Explicit read-only preflight/dry-run or approved legacy quarantine import"
+    classpath = sourceSets.test.get().runtimeClasspath
+    mainClass = "com.infinitygear.persistence.LegacyQuarantineMigrationCli"
 }

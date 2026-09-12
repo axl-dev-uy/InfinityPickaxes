@@ -244,6 +244,7 @@ public class EnchantManager {
      * Returns true if successfully upgraded, false otherwise.
      */
     public boolean handleSocketUpgrade(Player player, InfinityPickaxe pickaxe, EnchantSocket socket, ItemStack bookItem) {
+        if (com.infinitygear.integration.ArchiveBookIdentity.marked(bookItem)) return false;
         if (player == null || pickaxe == null || socket == null || bookItem == null) {
             return false;
         }

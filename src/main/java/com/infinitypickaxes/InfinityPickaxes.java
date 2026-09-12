@@ -54,6 +54,8 @@ public class InfinityPickaxes extends JavaPlugin {
     private StationManager stationManager;
     private CostRegistry costRegistry;
     private MoneyGateway moneyGateway;
+    private com.infinitygear.integration.ArchiveIntegrationBootstrap archiveIntegration;
+    private com.infinitygear.mining.XpActivationService xpActivation;
 
     @Override
     public void onEnable() {
@@ -121,8 +123,12 @@ public class InfinityPickaxes extends JavaPlugin {
         this.gearService = new InfinityGearServiceImpl(this, gearManager, gearProfiles);
         getServer().getServicesManager().register(InfinityGearService.class, gearService, this,
                 org.bukkit.plugin.ServicePriority.Normal);
+        getServer().getServicesManager().register(com.infinitygear.api.v1.ArchiveIntegrationService.class,
+                new com.infinitygear.integration.ArchiveDiscoveryService(this), this,
+                org.bukkit.plugin.ServicePriority.Normal);
         this.guiManager = new GuiManager(this);
         this.stationManager = new StationManager(this);
+        this.archiveIntegration = new com.infinitygear.integration.ArchiveIntegrationBootstrap(this);
 
         int socketsCount = enchantManager.getAllSockets().size();
         boolean ecoPresent = enchantManager.getEcoHook().isEcoEnchantsPresent();
@@ -143,6 +149,7 @@ public class InfinityPickaxes extends JavaPlugin {
         pm.registerEvents(new PickaxeInteractListener(this), this);
         pm.registerEvents(this.guiManager, this);
         pm.registerEvents(new StationListener(this, stationManager), this);
+        pm.registerEvents(new com.infinitygear.integration.BookLifecycleCustodyListener(), this);
         if (getServer().getPluginManager().isPluginEnabled("Nexo")) {
             pm.registerEvents(new com.infinitygear.nexo.NexoStationListener(this, stationManager), this);
         }
@@ -182,6 +189,7 @@ public class InfinityPickaxes extends JavaPlugin {
      */
     public void reloadPlugin(CommandSender sender) {
         long start = System.currentTimeMillis();
+        if (archiveIntegration != null) archiveIntegration.beginReload();
 
         // 1. Close open CustomGui inventories
         for (Player p : Bukkit.getOnlinePlayers()) {
@@ -220,6 +228,7 @@ public class InfinityPickaxes extends JavaPlugin {
             this.papiHook = new PlaceholderAPIHook(this);
             this.papiHook.register();
         }
+        if (archiveIntegration != null) archiveIntegration.finishReload();
 
         long elapsed = System.currentTimeMillis() - start;
         messageManager.sendMessage(sender, "messages.reload-success");
@@ -228,6 +237,7 @@ public class InfinityPickaxes extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (archiveIntegration != null) archiveIntegration.close();
         if (duplicateListener != null) duplicateListener.stop();
 
         // 1. Close any open CustomGui inventories
@@ -307,6 +317,11 @@ public class InfinityPickaxes extends JavaPlugin {
     public StationManager getStationManager() { return stationManager; }
     public CostRegistry getCostRegistry() { return costRegistry; }
     public MoneyGateway getMoneyGateway() { return moneyGateway; }
+    public com.infinitygear.mining.XpActivationService getXpActivation() { return xpActivation; }
+    public void setXpActivation(com.infinitygear.mining.XpActivationService service) { this.xpActivation = service; }
+    public boolean isStrictMiningDeliveryActive() {
+        return archiveIntegration != null && archiveIntegration.miningPipelineActive();
+    }
 
     private MoneyGateway createMoneyGateway() {
         if (!getServer().getPluginManager().isPluginEnabled("Vault")) return new UnavailableMoneyGateway();

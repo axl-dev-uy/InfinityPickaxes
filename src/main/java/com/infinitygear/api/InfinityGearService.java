@@ -9,7 +9,15 @@ import org.bukkit.inventory.ItemStack;
 import java.util.Collection;
 import java.util.Optional;
 
-/** Stable capability API. Every mutation method requires Bukkit's primary thread. */
+/**
+ * Legacy in-plugin compatibility service. Its signatures intentionally retain
+ * implementation types and it is not part of the published external consumer
+ * contract. External integrations must compile only against
+ * {@code com.infinitygear.api.v1}, in particular
+ * {@link com.infinitygear.api.v1.ArchiveIntegrationService}.
+ * Every mutation method requires Bukkit's primary thread.
+ */
+@Deprecated(since = "2.0.0", forRemoval = false)
 public interface InfinityGearService {
     boolean isGear(ItemStack item);
     Optional<GearSnapshot> inspect(ItemStack item);
