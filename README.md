@@ -10,17 +10,28 @@ InfinityGear is a Paper 26.2 / Java 25 plugin for persistent, uniquely identifie
 
 EcoEnchants/Bukkit remain authoritative for canonical enchantment identity, native targets, conflicts, compatibility, metadata, and native maximums. InfinityGear adds administrator caps, disabled policies, symmetric additional conflicts, profile compatibility, sockets, and costs. `enchants.yml` synchronization is additive: missing live entries are appended; administrator edits and temporarily unavailable/orphaned entries are preserved.
 
-## Migration from InfinityPickaxes
+## Legacy plugin-folder migration
 
 Remove the old jar before enabling InfinityGear. InfinityGear refuses to run if the old plugin is active and declares `InfinityPickaxes` as a provided legacy identity.
 
-On first startup, the legacy `plugins/InfinityPickaxes` folder is copied to a dated sibling backup and missing files are copied into `plugins/InfinityGear`. Existing InfinityGear files are never overwritten, the old folder is never deleted, and `.infinitypickaxes-migration-v1` makes the process idempotent. A partial or ambiguous migration fails closed.
+On first startup, the legacy `plugins/InfinityPickaxes` folder is copied to a dated sibling backup and missing files are copied into `plugins/InfinityGear`. Existing InfinityGear files are never overwritten, the old folder is never deleted, and `.infinitypickaxes-migration-v1` makes the process idempotent. A partial or ambiguous migration fails closed. This automatic compatibility step only migrates the legacy plugin folder and its local SQLite-era layout. It does not import quarantine records into MariaDB, approve a Task #7 authority cutover, freeze SQLite or enable `book-application`.
 
 Legacy item PDC is read indefinitely and migrated lazily when an item is inspected, scanned, held, or used. Valid migration preserves UUID, level, XP, blocks mined, quarantine state, material, name, lore, and enchantments, writes schema version 1, and mirrors legacy keys during the compatibility window. New data is preferred. A malformed/missing legacy UUID is preserved and reported; InfinityGear never silently creates a replacement UUID.
 
-`duplicates.db` is the single authority copied into the new folder. Its existing tables and records remain in place; a transactional migration adds `schema_migrations`, tracked kind, and tracked type without losing status, timestamps, reason, resolver, replacement UUID, sightings, actor, or location.
+While `quarantine-authority: sqlite`, `duplicates.db` is the single active
+quarantine authority copied into the new folder. Its existing tables and records
+remain in place; a transactional local SQLite schema migration adds
+`schema_migrations`, tracked kind and tracked type without losing status,
+timestamps, reason, resolver, replacement UUID, sightings, actor or location.
+That local schema migration is distinct from the operator-invoked Task #7 import
+into MariaDB and never performs that import silently.
 
-Rollback: stop the server, save `plugins/InfinityGear` and its database/WAL files, remove the InfinityGear jar, restore the dated legacy backup as `plugins/InfinityPickaxes`, and restore the old jar. Never run both jars.
+Legacy plugin rollback, before any MariaDB-authority runtime write: stop the
+server, save `plugins/InfinityGear` and its database/WAL files, remove the
+InfinityGear jar, restore the dated legacy backup as `plugins/InfinityPickaxes`,
+and restore the old jar. Never run both jars. After any MariaDB-authority runtime
+write, do not revive the older SQLite writer; keep the server offline and
+reconcile or roll forward.
 
 ## Gear profiles
 
@@ -84,12 +95,16 @@ Tracked kinds include `GEAR`, `RUNIC_ERASER`, `RUNIC_CONDUIT`, and `RUNIC_RIVET`
 
 Detection is observational. It cannot prove detection of copies that are never simultaneously visible (for example, an offline inventory and an unopened chest), and arbitrary virtual inventories owned by other plugins are not globally enumerable.
 
-For the approved initial Archive application topology, migration 13 also
-provides a normalized MariaDB quarantine authority and an explicit legacy
-SQLite importer. SQLite remains the default authority until an operator performs
-the separately approved offline backup/import/cutover. MariaDB mode requires the
-exact accepted import source ID and never writes `duplicates.db`; after any
-MariaDB-mode mutation, falling back to a stale SQLite writer is unsafe. Import
+For the approved initial Archive application topology, MariaDB is the approved
+deployment quarantine mode and migration 13 provides its normalized authority
+plus an explicit legacy SQLite importer. That architecture decision does not by
+itself approve production cutover. The importer is operator-invoked only:
+SQLite remains the default authority until Axel approves an offline maintenance
+window, the actual deployment DB/WAL/SHM set is reconfirmed and backed up outside
+the plugin directory, the import succeeds without unresolved conflicts and the
+cutover is explicitly configured. MariaDB mode requires the exact accepted
+import source ID and never opens or writes `duplicates.db`. After any MariaDB-mode
+runtime mutation, falling back to the stale SQLite writer is unsafe. Import
 conflicts preserve all source evidence and remain quarantined for manual
 resolution.
 
