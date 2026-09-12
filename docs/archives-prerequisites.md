@@ -1,5 +1,30 @@
 # Archives prerequisite contract, version 1
 
+## Task #7 single-server acceptance checkpoint (2026-09-12)
+
+This section supersedes current-status claims in older dated checkpoints below;
+their implementation history remains intact. InfinityGear `12d0986` now includes
+the narrow tracked no-replacement application participant plus configured
+`SINGLE_SERVER` deployment epochs, exact identity custody claims, a migration-13
+MariaDB quarantine authority and an explicit fail-closed SQLite importer.
+NoxwardArchives supplies only the approved operation-specific
+`BookApplicationService.PolicyAuthority`; it contains no Archive gameplay,
+reward logic or broader provenance policy.
+
+The exact Task #7 plugin artifact
+`0897c987c50b69ba7cecb7bad8ae39ddf588eee1a8b5fd4e0d2eceefe723d9fe`
+passed 342 automated tests and the clean disposable Paper 26.2 build 121 / Java
+25 application interruption, restart, conservation, rejection and native-storage
+matrix, recorded in
+[Task #7 clean acceptance](../../NoxwardArchive/docs/task-7-clean-acceptance-results.md).
+MariaDB 12.3.3 and JDBC 3.5.6 loaded through Paper's runtime library
+pipeline. The accepted initial topology is only `noxward-prison-01`;
+cross-server transfer/leases and Nexo are not supported. Production installation,
+reconfirming and backing up the real deployment SQLite DB/WAL/SHM set,
+import/freeze and capability enablement each remain separate Axel/Officer_Ray
+decisions. `book-application` defaults false and aggregate `book-lifecycle`
+remains false.
+
 ## Task #6 physical application checkpoint (2026-09-10)
 
 The first operation-specific physical participant now exists for the only

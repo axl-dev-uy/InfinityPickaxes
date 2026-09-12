@@ -1,5 +1,29 @@
 # Archive book lifecycle contract — slices 1 and 2
 
+## Task #7 acceptance update — 2026-09-12
+
+The dated slices below remain the design and implementation history. The current
+source at `12d0986` adds the approved `SINGLE_SERVER` deployment/epoch authority,
+identity custody claims, migration-13 MariaDB quarantine authority and explicit
+legacy SQLite importer around the Task #6 application participant. The external
+production policy remains operation-specific: NoxwardArchives may authorize only
+one canonical, uniquely held, unstacked, non-quarantined tracked book, value 1:1,
+onto uniquely identified non-quarantined equipment with no target enchantment or
+Archive attachment. Replacement, removal, transfer, fusion, bulk and ambiguous
+dispositions still reject; aggregate `book-lifecycle` remains false.
+
+The exact
+`0897c987c50b69ba7cecb7bad8ae39ddf588eee1a8b5fd4e0d2eceefe723d9fe`
+artifact passed 342 automated tests and the approved clean disposable Paper
+phase/interruption and native-serialization matrix, recorded in
+[Task #7 clean acceptance](../../NoxwardArchive/docs/task-7-clean-acceptance-results.md).
+That closes
+the recorded single-server fixture acceptance, not production rollout. The
+deployment SQLite path must still be reconfirmed offline; its DB/WAL/SHM set must
+be backed up outside the plugin directory, imported explicitly with conflicts
+fail-closed, and frozen only after separate operator approval. Cross-server
+custody/transfer and Nexo remain deferred.
+
 Status date: 2026-09-10. Slice 1 defined the public transaction vocabulary and
 recovery state machine. Slice 2 implements its MariaDB journal and attachment
 repository. Neither slice mutates Bukkit inventories, registers a lifecycle

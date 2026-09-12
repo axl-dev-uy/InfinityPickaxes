@@ -84,6 +84,15 @@ Tracked kinds include `GEAR`, `RUNIC_ERASER`, `RUNIC_CONDUIT`, and `RUNIC_RIVET`
 
 Detection is observational. It cannot prove detection of copies that are never simultaneously visible (for example, an offline inventory and an unopened chest), and arbitrary virtual inventories owned by other plugins are not globally enumerable.
 
+For the approved initial Archive application topology, migration 13 also
+provides a normalized MariaDB quarantine authority and an explicit legacy
+SQLite importer. SQLite remains the default authority until an operator performs
+the separately approved offline backup/import/cutover. MariaDB mode requires the
+exact accepted import source ID and never writes `duplicates.db`; after any
+MariaDB-mode mutation, falling back to a stale SQLite writer is unsafe. Import
+conflicts preserve all source evidence and remain quarantined for manual
+resolution.
+
 ## API compatibility
 
 `InfinityGearService` is registered through Bukkit’s service manager. It provides immutable inspection snapshots, profile resolution, gear/artifact creation, explicit mutation results and reason/message codes, enchantment application, socket inspection, duplicate/quarantine status, eligible enchantments, and immutable resolved global-plus-profile enchantment policy queries. Mutation methods require the primary server thread.
@@ -119,4 +128,16 @@ See `plugin.yml` for granular give, artifact, reload, station, migration, duplic
 ./gradlew build
 ```
 
-The production artifact is `build/libs/InfinityGear-2.0.0-SNAPSHOT.jar`. Unit tests cover pure enchantment/fusion/cost/transform/socket rules, compensation, inventory capacity, PDC parsing, data-folder idempotency, SQLite record migration, duplicate scanner hardening, GUI cancellation, commands, legacy behavior, XP adoption fencing, custody interaction guards, lifecycle capability fencing, and Paper recovery scheduling. Disposable MariaDB tests cover the XP authority plus lifecycle migrations, attachment revisions, active equipment/source claims, contention, terminal release, and rollback. A real Paper test server is still required to exercise EcoEnchants/Nexo/Vault event timing, tracked-book serialization, every inventory interruption boundary, rendered menus, native inventory persistence across process restarts, and production inventory interaction end to end.
+The production artifact is `build/libs/InfinityGear-2.0.0-SNAPSHOT.jar`. Unit tests cover pure enchantment/fusion/cost/transform/socket rules, compensation, inventory capacity, PDC parsing, data-folder idempotency, SQLite record migration, duplicate scanner hardening, GUI cancellation, commands, legacy behavior, XP adoption fencing, custody interaction guards, lifecycle capability fencing, and Paper recovery scheduling. Disposable MariaDB tests cover the XP authority, lifecycle migrations, attachment revisions, deployment epochs, identity claims, the quarantine authority/importer, contention, terminal release, rollback and exact restart recovery.
+
+Task #7's exact `12d0986` build passed 342 tests and its
+`0897c987c50b69ba7cecb7bad8ae39ddf588eee1a8b5fd4e0d2eceefe723d9fe`
+plugin artifact passed the approved disposable Paper 26.2 build 121 / Java 25
+single-server application matrix, including every phase boundary, controlled
+process termination, exact value conservation and native player/container/
+Ender/drop serialization. The exact evidence is in the
+[clean Task #7 acceptance record](../NoxwardArchive/docs/task-7-clean-acceptance-results.md).
+This acceptance does not cover Nexo, Vault, arbitrary
+virtual inventories, cross-server transfer or production deployment. Production
+installation, the offline SQLite backup/import/freeze and `book-application`
+enablement remain separately gated; aggregate `book-lifecycle` remains false.
