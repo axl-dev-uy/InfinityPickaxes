@@ -1,6 +1,14 @@
 package com.infinitygear.integration;
 
-import com.axl.custodian.api.*;
+import com.axl.custodian.api.CustodianApi;
+import com.axl.custodian.api.identity.AuthorityHandle;
+import com.axl.custodian.api.identity.IdentityOrigin;
+import com.axl.custodian.api.identity.IdentitySnapshot;
+import com.axl.custodian.api.identity.IdentityState;
+import com.axl.custodian.api.identity.RegistrationResult;
+import com.axl.custodian.api.presence.PhysicalInstance;
+import com.axl.custodian.api.presence.PhysicalPresence;
+import com.axl.custodian.api.presence.ProcessEpoch;
 import com.infinitygear.data.GearData;
 import com.infinitygear.data.TrackedKind;
 import org.bukkit.NamespacedKey;

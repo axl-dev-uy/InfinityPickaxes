@@ -1,14 +1,14 @@
 package com.infinitygear.integration;
 
-import com.axl.custodian.api.AuthorityHandle;
-import com.axl.custodian.api.BridgeHandle;
+import com.axl.custodian.api.identity.AuthorityHandle;
+import com.axl.custodian.api.shadow.BridgeHandle;
 import com.axl.custodian.api.CustodianApi;
-import com.axl.custodian.api.DuplicateAssessment;
-import com.axl.custodian.api.IdentityOrigin;
-import com.axl.custodian.api.IdentitySnapshot;
-import com.axl.custodian.api.IdentityState;
-import com.axl.custodian.api.RegistrationResult;
-import com.axl.custodian.api.ScopeContribution;
+import com.axl.custodian.api.presence.DuplicateAssessment;
+import com.axl.custodian.api.identity.IdentityOrigin;
+import com.axl.custodian.api.identity.IdentitySnapshot;
+import com.axl.custodian.api.identity.IdentityState;
+import com.axl.custodian.api.identity.RegistrationResult;
+import com.axl.custodian.api.shadow.ScopeContribution;
 import com.axl.custodian.api.ShadowContributor;
 import com.infinitygear.data.GearData;
 import com.infinitygear.data.TrackedKind;

@@ -1,15 +1,15 @@
 package com.infinitygear.integration;
 
-import com.axl.custodian.api.AuthorityHandle;
-import com.axl.custodian.api.BridgeHandle;
+import com.axl.custodian.api.identity.AuthorityHandle;
+import com.axl.custodian.api.shadow.BridgeHandle;
 import com.axl.custodian.api.CustodianApi;
-import com.axl.custodian.api.DuplicateAssessment;
-import com.axl.custodian.api.PhysicalInstance;
-import com.axl.custodian.api.PhysicalPresence;
-import com.axl.custodian.api.ProcessEpoch;
-import com.axl.custodian.api.RegistrationResult;
-import com.axl.custodian.api.ScannerScope;
-import com.axl.custodian.api.ScopeContribution;
+import com.axl.custodian.api.presence.DuplicateAssessment;
+import com.axl.custodian.api.presence.PhysicalInstance;
+import com.axl.custodian.api.presence.PhysicalPresence;
+import com.axl.custodian.api.presence.ProcessEpoch;
+import com.axl.custodian.api.identity.RegistrationResult;
+import com.axl.custodian.api.presence.ScannerScope;
+import com.axl.custodian.api.shadow.ScopeContribution;
 import com.axl.custodian.api.ShadowContributor;
 import com.infinitypickaxes.InfinityPickaxes;
 import com.infinitypickaxes.core.duplicate.DuplicateScanResult;

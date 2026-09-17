@@ -1,10 +1,10 @@
 package com.infinitygear.integration;
 
-import com.axl.custodian.api.AuthorityHandle;
+import com.axl.custodian.api.identity.AuthorityHandle;
 import com.axl.custodian.api.CustodianApi;
-import com.axl.custodian.api.ObservationResult;
-import com.axl.custodian.api.PhysicalPresence;
-import com.axl.custodian.api.RegistrationResult;
+import com.axl.custodian.api.presence.ObservationResult;
+import com.axl.custodian.api.presence.PhysicalPresence;
+import com.axl.custodian.api.identity.RegistrationResult;
 import com.infinitygear.data.GearData;
 import org.bukkit.inventory.ItemStack;
 import java.util.Optional;
