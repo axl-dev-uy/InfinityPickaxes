@@ -467,7 +467,8 @@ public class PickaxeDuplicateService implements AutoCloseable {
                 plugin.getLogger().log(Level.SEVERE, "Could not quarantine duplicate tracked item " + uuid, exception);
             }
         }
-        return new DuplicateScanResult(sightings.observedCopies(), detected);
+        return new DuplicateScanResult(
+                sightings.observedCopies(), sightings.physicalInstanceCounts(), detected);
     }
 
     private CompletableFuture<DuplicateScanResult> quarantineDuplicatesAsync(
@@ -501,7 +502,8 @@ public class PickaxeDuplicateService implements AutoCloseable {
             writes.add(write);
         }
         return CompletableFuture.allOf(writes.toArray(CompletableFuture[]::new))
-                .thenApply(ignored -> new DuplicateScanResult(sightings.observedCopies(), detected));
+                .thenApply(ignored -> new DuplicateScanResult(
+                        sightings.observedCopies(), sightings.physicalInstanceCounts(), detected));
     }
 
     private void markVisibleCopies(UUID uuid) {

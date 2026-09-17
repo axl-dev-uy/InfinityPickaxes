@@ -23,12 +23,34 @@ import static org.mockito.Mockito.when;
 
 class CustodianShadowConnectionTest {
     @Test
+    void disabledConfigurationDoesNotDiscoverOrStartCustodianServices() {
+        InfinityPickaxes plugin = mock(InfinityPickaxes.class);
+        Server server = mock(Server.class);
+        ServicesManager services = mock(ServicesManager.class);
+        ConfigManager configManager = mock(ConfigManager.class);
+        FileConfiguration config = mock(FileConfiguration.class);
+        when(plugin.getServer()).thenReturn(server);
+        when(plugin.getLogger()).thenReturn(mock(Logger.class));
+        when(plugin.getConfigManager()).thenReturn(configManager);
+        when(configManager.getConfig()).thenReturn(config);
+        when(server.getServicesManager()).thenReturn(services);
+
+        assertTrue(CustodianSettledShadowScanner.connect(plugin).isEmpty());
+        verify(services, never()).getRegistration(any());
+    }
+
+    @Test
     void unavailableServicesLeaveShadowScannerInactive() {
         InfinityPickaxes plugin = mock(InfinityPickaxes.class);
         Server server = mock(Server.class);
         ServicesManager services = mock(ServicesManager.class);
+        ConfigManager configManager = mock(ConfigManager.class);
+        FileConfiguration config = mock(FileConfiguration.class);
         when(plugin.getServer()).thenReturn(server);
         when(plugin.getLogger()).thenReturn(mock(Logger.class));
+        when(plugin.getConfigManager()).thenReturn(configManager);
+        when(configManager.getConfig()).thenReturn(config);
+        when(config.getBoolean("custodian-shadow.enabled", false)).thenReturn(true);
         when(server.getServicesManager()).thenReturn(services);
 
         assertTrue(CustodianSettledShadowScanner.connect(plugin).isEmpty());
@@ -55,6 +77,7 @@ class CustodianShadowConnectionTest {
         when(plugin.getLogger()).thenReturn(logger);
         when(plugin.getConfigManager()).thenReturn(configManager);
         when(configManager.getConfig()).thenReturn(config);
+        when(config.getBoolean("custodian-shadow.enabled", false)).thenReturn(true);
         when(config.getString("custodian-shadow.server-id", "local")).thenReturn("paper-beta");
         when(config.getLong("custodian-shadow.heartbeat-ticks", 200L)).thenReturn(200L);
         when(server.getServicesManager()).thenReturn(services);

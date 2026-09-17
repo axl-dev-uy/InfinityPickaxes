@@ -12,6 +12,7 @@ import com.axl.custodian.api.ScannerScope;
 import com.axl.custodian.api.ScopeContribution;
 import com.axl.custodian.api.ShadowContributor;
 import com.infinitypickaxes.InfinityPickaxes;
+import com.infinitypickaxes.core.duplicate.DuplicateScanResult;
 import com.infinitypickaxes.core.duplicate.PhysicalStorageKey;
 import java.time.Clock;
 import java.time.Instant;
@@ -24,7 +25,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.function.Consumer;
+import java.util.concurrent.CompletionStage;
 import java.util.logging.Level;
 import org.bukkit.Location;
 import org.bukkit.World;
@@ -43,8 +44,7 @@ import org.bukkit.plugin.RegisteredServiceProvider;
 import org.bukkit.scheduler.BukkitTask;
 
 /** Settled, read-only comparison scanner. Legacy duplicate enforcement remains authoritative. */
-public final class CustodianSettledShadowScanner
-        implements Consumer<Collection<PhysicalStorageKey>>, AutoCloseable {
+public final class CustodianSettledShadowScanner implements AutoCloseable {
     private static final String AUTHORITY_ID = "infinitygear";
 
     private final InfinityPickaxes plugin;
@@ -56,6 +56,10 @@ public final class CustodianSettledShadowScanner
     private boolean closed;
 
     public static Optional<CustodianSettledShadowScanner> connect(InfinityPickaxes plugin) {
+        if (!plugin.getConfigManager().getConfig().getBoolean("custodian-shadow.enabled", false)) {
+            plugin.getLogger().info("Custodian shadow parity reporting is disabled; legacy duplicate protection remains authoritative.");
+            return Optional.empty();
+        }
         var services = plugin.getServer().getServicesManager();
         RegisteredServiceProvider<CustodianApi> api = services.getRegistration(CustodianApi.class);
         RegisteredServiceProvider<ShadowContributor> shadow = services.getRegistration(ShadowContributor.class);
@@ -95,30 +99,54 @@ public final class CustodianSettledShadowScanner
                 plugin, this::heartbeatSafely, heartbeatTicks, heartbeatTicks);
     }
 
-    @Override
-    public void accept(Collection<PhysicalStorageKey> retainedStorages) {
+    public void observe(
+            Collection<PhysicalStorageKey> retainedStorages,
+            CompletionStage<DuplicateScanResult> legacyResult) {
         if (closed) return;
+        ShadowOutcome custodian = snapshot(retainedStorages);
+        legacyResult.whenComplete((legacy, failure) -> {
+            if (failure != null) {
+                plugin.getLogger().log(Level.WARNING,
+                        "Custodian shadow parity skipped because the authoritative legacy scan failed.", failure);
+                return;
+            }
+            ShadowParityReport report = ShadowParityReport.compare(
+                    legacy, custodian.physicalInstances(), custodian.duplicates());
+            if (report.agreement()) plugin.getLogger().info(report.diagnostic());
+            else plugin.getLogger().warning(report.diagnostic());
+        });
+    }
+
+    private ShadowOutcome snapshot(Collection<PhysicalStorageKey> retainedStorages) {
+        if (closed) return ShadowOutcome.empty();
+        Map<UUID, Integer> physicalInstances = new LinkedHashMap<>();
+        Set<UUID> duplicates = new LinkedHashSet<>();
         try {
             Set<PhysicalStorageKey> visited = new LinkedHashSet<>();
             for (Player player : plugin.getServer().getOnlinePlayers()) {
                 scanInventory(player.getInventory(), new Scope(
                         "player:" + player.getUniqueId() + ":inventory",
-                        "player:" + player.getUniqueId()));
+                        "player:" + player.getUniqueId()), physicalInstances, duplicates);
                 scanInventory(player.getEnderChest(), new Scope(
                         "player:" + player.getUniqueId() + ":ender",
-                        "player:" + player.getUniqueId()));
-                scanPhysical(player.getOpenInventory().getTopInventory(), visited);
+                        "player:" + player.getUniqueId()), physicalInstances, duplicates);
+                scanPhysical(player.getOpenInventory().getTopInventory(), visited,
+                        physicalInstances, duplicates);
             }
             for (PhysicalStorageKey retained : retainedStorages) {
-                retained.resolveInventory().ifPresent(inventory -> scanPhysical(inventory, visited));
+                retained.resolveInventory().ifPresent(inventory -> scanPhysical(
+                        inventory, visited, physicalInstances, duplicates));
             }
             for (World world : plugin.getServer().getWorlds()) {
-                for (Item item : world.getEntitiesByClass(Item.class)) scanDrop(item);
+                for (Item item : world.getEntitiesByClass(Item.class)) {
+                    scanDrop(item, physicalInstances, duplicates);
+                }
             }
         } catch (RuntimeException failure) {
             plugin.getLogger().log(Level.WARNING,
                     "Custodian settled shadow snapshot failed; legacy duplicate protection is unchanged.", failure);
         }
+        return new ShadowOutcome(physicalInstances, duplicates);
     }
 
     @Override
@@ -128,15 +156,23 @@ public final class CustodianSettledShadowScanner
         heartbeatTask.cancel();
     }
 
-    private void scanPhysical(Inventory inventory, Set<PhysicalStorageKey> visited) {
+    private void scanPhysical(
+            Inventory inventory,
+            Set<PhysicalStorageKey> visited,
+            Map<UUID, Integer> physicalInstances,
+            Set<UUID> duplicates) {
         Optional<PhysicalStorageKey> key = PhysicalStorageKey.from(inventory);
         if (key.isEmpty() || !visited.add(key.get())) return;
         Scope scope = physicalScope(inventory);
         if (scope == null) return;
-        scanInventory(inventory, scope);
+        scanInventory(inventory, scope, physicalInstances, duplicates);
     }
 
-    private void scanInventory(Inventory inventory, Scope scope) {
+    private void scanInventory(
+            Inventory inventory,
+            Scope scope,
+            Map<UUID, Integer> physicalInstances,
+            Set<UUID> duplicates) {
         if (inventory == null) return;
         Map<UUID, List<PhysicalPresence>> byIdentity = new LinkedHashMap<>();
         ItemStack[] contents = inventory.getContents();
@@ -146,14 +182,19 @@ public final class CustodianSettledShadowScanner
             byIdentity.computeIfAbsent(identity, ignored -> new ArrayList<>()).add(presence(
                     identity, scope.id() + ":slot:" + slot, scope.location() + "/slot/" + slot));
         }
-        byIdentity.forEach((identity, presences) -> submit(identity, scope.id(), presences));
+        byIdentity.forEach((identity, presences) -> submit(
+                identity, scope.id(), presences, physicalInstances, duplicates));
     }
 
-    private void scanDrop(Item item) {
+    private void scanDrop(
+            Item item,
+            Map<UUID, Integer> physicalInstances,
+            Set<UUID> duplicates) {
         UUID identity = adopt(item.getItemStack()).orElse(null);
         if (identity == null) return;
         String scope = "drop:" + item.getUniqueId();
-        submit(identity, scope, List.of(presence(identity, scope + ":item", location(item.getLocation()))));
+        submit(identity, scope, List.of(presence(identity, scope + ":item", location(item.getLocation()))),
+                physicalInstances, duplicates);
     }
 
     private Optional<UUID> adopt(ItemStack item) {
@@ -168,10 +209,20 @@ public final class CustodianSettledShadowScanner
         return new PhysicalPresence(identity, opaqueEpoch, new PhysicalInstance(instance), location, now);
     }
 
-    private void submit(UUID identity, String scope, List<PhysicalPresence> presences) {
+    private void submit(
+            UUID identity,
+            String scope,
+            List<PhysicalPresence> presences,
+            Map<UUID, Integer> physicalInstances,
+            Set<UUID> duplicates) {
         try {
             DuplicateAssessment assessment = contributor.contribute(
                     bridge, new ScopeContribution(new ScannerScope(scope), presences));
+            int count = (int) assessment.activePresences().stream()
+                    .map(PhysicalPresence::instance).distinct().count();
+            physicalInstances.put(identity, count);
+            if (assessment.duplicateConfirmed()) duplicates.add(identity);
+            else duplicates.remove(identity);
             plugin.getLogger().info("Custodian shadow assessment identity=" + identity
                     + " scope=" + scope + " status=" + assessment.status()
                     + " active-presences=" + assessment.activePresences().size());
@@ -233,4 +284,15 @@ public final class CustodianSettledShadowScanner
     }
 
     private record Scope(String id, String location) { }
+
+    private record ShadowOutcome(Map<UUID, Integer> physicalInstances, Set<UUID> duplicates) {
+        private ShadowOutcome {
+            physicalInstances = Map.copyOf(physicalInstances);
+            duplicates = Set.copyOf(duplicates);
+        }
+
+        private static ShadowOutcome empty() {
+            return new ShadowOutcome(Map.of(), Set.of());
+        }
+    }
 }

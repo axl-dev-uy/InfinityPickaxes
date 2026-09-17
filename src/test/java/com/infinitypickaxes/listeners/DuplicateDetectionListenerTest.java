@@ -2,6 +2,7 @@ package com.infinitypickaxes.listeners;
 
 import com.infinitypickaxes.InfinityPickaxes;
 import com.infinitypickaxes.config.ConfigManager;
+import com.infinitypickaxes.core.duplicate.DuplicateScanResult;
 import com.infinitypickaxes.core.duplicate.PhysicalStorageKey;
 import com.infinitypickaxes.core.duplicate.PickaxeDuplicateService;
 import io.papermc.paper.block.TileStateInventoryHolder;
@@ -22,13 +23,18 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.MockedStatic;
 
 import java.util.Collection;
-import java.util.function.Consumer;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
+import java.util.function.BiConsumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.inOrder;
@@ -48,10 +54,14 @@ class DuplicateDetectionListenerTest {
         BukkitTask periodicTask = mock(BukkitTask.class);
         BukkitTask delayedTask = mock(BukkitTask.class);
         @SuppressWarnings("unchecked")
-        Consumer<Collection<PhysicalStorageKey>> shadowScan = mock(Consumer.class);
+        BiConsumer<Collection<PhysicalStorageKey>, CompletionStage<DuplicateScanResult>> shadowScan =
+                mock(BiConsumer.class);
+        CompletableFuture<DuplicateScanResult> legacyResult = CompletableFuture.completedFuture(
+                new DuplicateScanResult(0, Map.of(), Set.of()));
         when(plugin.getConfigManager()).thenReturn(configManager);
         when(configManager.getConfig()).thenReturn(config);
         when(plugin.getDuplicateService()).thenReturn(duplicateService);
+        when(duplicateService.scanOnlineAsync(any(), any())).thenReturn(legacyResult);
         when(config.getLong("duplicate-protection.scan-interval-ticks", 1200L)).thenReturn(1200L);
         when(config.getLong("duplicate-protection.debounce-ticks", 10L)).thenReturn(10L);
 
@@ -93,7 +103,7 @@ class DuplicateDetectionListenerTest {
                     "block:" + worldUuid + ":8:72:-3")));
             var order = inOrder(duplicateService, shadowScan);
             order.verify(duplicateService).scanOnlineAsync(eq("automatic:storage-close:builder"), any());
-            order.verify(shadowScan).accept(any());
+            order.verify(shadowScan).accept(any(), same(legacyResult));
             verify(scheduler, times(1)).runTaskLater(eq(plugin), any(Runnable.class), eq(10L));
             listener.stop();
         }

@@ -78,6 +78,7 @@ class PhysicalStorageScannerTest {
             DuplicateScanResult result = service.scanOnline("automatic:join:returning");
 
             assertEquals(1, result.itemsScanned());
+            assertEquals(1, result.physicalInstanceCounts().get(uuid));
             assertTrue(result.duplicatesDetected().isEmpty());
             verify(personal).setItem(EquipmentSlot.CHEST, null);
             verify(personal).addItem(armor);
@@ -125,6 +126,7 @@ class PhysicalStorageScannerTest {
             DuplicateScanResult result = service.scanOnline("test:armor-profile");
 
             assertEquals(2, result.itemsScanned());
+            assertEquals(2, result.physicalInstanceCounts().get(uuid));
             assertTrue(result.duplicatesDetected().contains(uuid));
             verify(store).quarantine(eq(uuid), eq(TrackedKind.GEAR.name()), eq("infinitygear:armor"),
                     anyString(), eq("test:armor-profile"), anyList());

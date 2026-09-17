@@ -25,6 +25,12 @@ final class DuplicateObservations<T> {
         return observedCopies;
     }
 
+    Map<UUID, Integer> physicalInstanceCounts() {
+        Map<UUID, Integer> counts = new LinkedHashMap<>();
+        byUuid.forEach((identity, observations) -> counts.put(identity, observations.size()));
+        return counts;
+    }
+
     Map<UUID, List<Observation<T>>> entries() {
         return byUuid;
     }

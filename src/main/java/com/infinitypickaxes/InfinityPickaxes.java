@@ -166,7 +166,7 @@ public class InfinityPickaxes extends JavaPlugin {
         this.heldListener = new PickaxeHeldListener(this);
         pm.registerEvents(this.heldListener, this);
         this.duplicateListener = new DuplicateDetectionListener(this,
-                custodianShadow == null ? null : custodianShadow::accept);
+                custodianShadow == null ? null : custodianShadow::observe);
         pm.registerEvents(this.duplicateListener, this);
 
         // 4. Register PlaceholderAPI Hook if present

@@ -13,6 +13,7 @@ import com.axl.custodian.api.ShadowContributor;
 import com.infinitygear.data.GearData;
 import com.infinitygear.data.TrackedKind;
 import com.infinitypickaxes.InfinityPickaxes;
+import com.infinitypickaxes.core.duplicate.DuplicateScanResult;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -20,6 +21,9 @@ import java.util.List;
 import java.util.Arrays;
 import java.util.Set;
 import java.util.UUID;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.bukkit.Location;
 import org.bukkit.Server;
@@ -44,6 +48,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.doReturn;
@@ -111,8 +116,10 @@ class CustodianSettledShadowScannerTest {
 
         CustodianSettledShadowScanner scanner = new CustodianSettledShadowScanner(
                 plugin, api, contributor, authority, "local", Clock.fixed(NOW, ZoneOffset.UTC), 200L);
-        scanner.accept(List.of());
-        scanner.accept(List.of());
+        scanner.observe(List.of(), CompletableFuture.completedFuture(
+                new DuplicateScanResult(3, Map.of(identity, 3), Set.of(identity))));
+        scanner.observe(List.of(), CompletableFuture.completedFuture(
+                new DuplicateScanResult(3, Map.of(identity, 3), Set.of(identity))));
 
         ArgumentCaptor<ScopeContribution> contributions = ArgumentCaptor.forClass(ScopeContribution.class);
         verify(contributor, times(6)).contribute(eq(bridge), contributions.capture());
@@ -162,7 +169,8 @@ class CustodianSettledShadowScannerTest {
         verify(contributor).startBridgeEpoch(authority, "local");
         scanner.close();
         heartbeat.getValue().run();
-        scanner.accept(List.of());
+        scanner.observe(List.of(), CompletableFuture.completedFuture(
+                new DuplicateScanResult(0, Map.of(), Set.of())));
         verify(contributor, times(1)).heartbeat(bridge);
         verify(task).cancel();
     }
@@ -206,12 +214,97 @@ class CustodianSettledShadowScannerTest {
 
         CustodianSettledShadowScanner scanner = new CustodianSettledShadowScanner(
                 plugin, api, contributor, authority, "local", Clock.fixed(NOW, ZoneOffset.UTC), 200L);
-        scanner.accept(List.of());
+        scanner.observe(List.of(), CompletableFuture.completedFuture(
+                new DuplicateScanResult(0, Map.of(), Set.of())));
 
         verify(api, times(1)).adopt(authority, conflictId);
         verify(contributor, never()).contribute(any(), any());
         verify(malformed, never()).setItemMeta(any());
         verify(conflict, never()).setItemMeta(any());
+        scanner.close();
+    }
+
+    @Test
+    void parityMismatchIsDiagnosticOnlyAndCannotInvokeLegacyEnforcementOrMutateItems() {
+        InfinityPickaxes plugin = mock(InfinityPickaxes.class);
+        Server server = mock(Server.class);
+        BukkitScheduler scheduler = mock(BukkitScheduler.class);
+        BukkitTask task = mock(BukkitTask.class);
+        Logger logger = mock(Logger.class);
+        CustodianApi api = mock(CustodianApi.class);
+        ShadowContributor contributor = mock(ShadowContributor.class);
+        AuthorityHandle authority = AuthorityHandle.issuedByHost("infinitygear");
+        BridgeHandle bridge = new BridgeHandle(UUID.randomUUID(), "infinitygear");
+        UUID identity = UUID.randomUUID();
+        ItemStack gear = gear(identity);
+        Player player = mock(Player.class);
+        PlayerInventory inventory = mock(PlayerInventory.class);
+        Inventory emptyEnderChest = inventory(new ItemStack[0]);
+        Inventory emptyTop = inventory(new ItemStack[0]);
+        when(inventory.getContents()).thenReturn(new ItemStack[]{gear});
+        when(player.getUniqueId()).thenReturn(UUID.randomUUID());
+        when(player.getInventory()).thenReturn(inventory);
+        when(player.getEnderChest()).thenReturn(emptyEnderChest);
+        InventoryView view = mock(InventoryView.class);
+        when(view.getTopInventory()).thenReturn(emptyTop);
+        when(player.getOpenInventory()).thenReturn(view);
+        when(plugin.getServer()).thenReturn(server);
+        when(plugin.getLogger()).thenReturn(logger);
+        when(server.getScheduler()).thenReturn(scheduler);
+        doReturn(List.of(player)).when(server).getOnlinePlayers();
+        when(server.getWorlds()).thenReturn(List.of());
+        when(scheduler.runTaskTimer(eq(plugin), any(Runnable.class), eq(200L), eq(200L))).thenReturn(task);
+        when(contributor.startBridgeEpoch(authority, "local")).thenReturn(bridge);
+        when(api.adopt(authority, identity)).thenReturn(registration(identity));
+        when(contributor.contribute(eq(bridge), any())).thenReturn(
+                new DuplicateAssessment(DuplicateAssessment.Status.CONFIRMED_DISTINCT_ACTIVE, List.of()));
+
+        CustodianSettledShadowScanner scanner = new CustodianSettledShadowScanner(
+                plugin, api, contributor, authority, "local", Clock.fixed(NOW, ZoneOffset.UTC), 200L);
+        scanner.observe(List.of(), CompletableFuture.completedFuture(
+                new DuplicateScanResult(1, Map.of(identity, 1), Set.of())));
+
+        ArgumentCaptor<String> diagnostic = ArgumentCaptor.forClass(String.class);
+        verify(logger).warning(diagnostic.capture());
+        assertTrue(diagnostic.getValue().contains("event=custodian_shadow_parity result=MISMATCH"));
+        assertTrue(diagnostic.getValue().contains("duplicate-decision-mismatches=[" + identity + "]"));
+        verify(gear, never()).setItemMeta(any());
+        verify(inventory, never()).setItem(any(Integer.class), any());
+        verify(plugin, never()).getDuplicateService();
+        verify(plugin, never()).getGearManager();
+        scanner.close();
+    }
+
+    @Test
+    void exceptionalLegacyFutureSkipsParityWithoutAffectingLegacyAuthority() {
+        InfinityPickaxes plugin = mock(InfinityPickaxes.class);
+        Server server = mock(Server.class);
+        BukkitScheduler scheduler = mock(BukkitScheduler.class);
+        BukkitTask task = mock(BukkitTask.class);
+        Logger logger = mock(Logger.class);
+        CustodianApi api = mock(CustodianApi.class);
+        ShadowContributor contributor = mock(ShadowContributor.class);
+        AuthorityHandle authority = AuthorityHandle.issuedByHost("infinitygear");
+        BridgeHandle bridge = new BridgeHandle(UUID.randomUUID(), "infinitygear");
+        RuntimeException legacyFailure = new RuntimeException("legacy authority unavailable");
+        when(plugin.getServer()).thenReturn(server);
+        when(plugin.getLogger()).thenReturn(logger);
+        when(server.getScheduler()).thenReturn(scheduler);
+        doReturn(List.of()).when(server).getOnlinePlayers();
+        when(server.getWorlds()).thenReturn(List.of());
+        when(scheduler.runTaskTimer(eq(plugin), any(Runnable.class), eq(200L), eq(200L))).thenReturn(task);
+        when(contributor.startBridgeEpoch(authority, "local")).thenReturn(bridge);
+
+        CustodianSettledShadowScanner scanner = new CustodianSettledShadowScanner(
+                plugin, api, contributor, authority, "local", Clock.fixed(NOW, ZoneOffset.UTC), 200L);
+        scanner.observe(List.of(), CompletableFuture.failedFuture(legacyFailure));
+
+        verify(logger).log(eq(Level.WARNING),
+                eq("Custodian shadow parity skipped because the authoritative legacy scan failed."),
+                same(legacyFailure));
+        verify(logger, never()).warning(any(String.class));
+        verify(plugin, never()).getDuplicateService();
+        verify(plugin, never()).getGearManager();
         scanner.close();
     }
 
