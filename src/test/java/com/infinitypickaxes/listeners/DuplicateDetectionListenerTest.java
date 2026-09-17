@@ -10,7 +10,9 @@ import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.entity.HumanEntity;
+import org.bukkit.entity.Player;
 import org.bukkit.event.inventory.InventoryCloseEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryView;
 import org.bukkit.scheduler.BukkitScheduler;
@@ -20,6 +22,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.MockedStatic;
 
 import java.util.Collection;
+import java.util.function.Consumer;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -28,8 +31,10 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.times;
 
 class DuplicateDetectionListenerTest {
 
@@ -42,6 +47,8 @@ class DuplicateDetectionListenerTest {
         BukkitScheduler scheduler = mock(BukkitScheduler.class);
         BukkitTask periodicTask = mock(BukkitTask.class);
         BukkitTask delayedTask = mock(BukkitTask.class);
+        @SuppressWarnings("unchecked")
+        Consumer<Collection<PhysicalStorageKey>> shadowScan = mock(Consumer.class);
         when(plugin.getConfigManager()).thenReturn(configManager);
         when(configManager.getConfig()).thenReturn(config);
         when(plugin.getDuplicateService()).thenReturn(duplicateService);
@@ -74,7 +81,8 @@ class DuplicateDetectionListenerTest {
             when(scheduler.runTaskLater(eq(plugin), delayedScan.capture(), eq(10L)))
                     .thenReturn(delayedTask);
 
-            DuplicateDetectionListener listener = new DuplicateDetectionListener(plugin);
+            DuplicateDetectionListener listener = new DuplicateDetectionListener(plugin, shadowScan);
+            listener.onInventoryClose(event);
             listener.onInventoryClose(event);
             delayedScan.getValue().run();
 
@@ -83,6 +91,42 @@ class DuplicateDetectionListenerTest {
             assertEquals(1, retained.getValue().size());
             assertTrue(retained.getValue().contains(new PhysicalStorageKey(
                     "block:" + worldUuid + ":8:72:-3")));
+            var order = inOrder(duplicateService, shadowScan);
+            order.verify(duplicateService).scanOnlineAsync(eq("automatic:storage-close:builder"), any());
+            order.verify(shadowScan).accept(any());
+            verify(scheduler, times(1)).runTaskLater(eq(plugin), any(Runnable.class), eq(10L));
+            listener.stop();
+        }
+    }
+
+    @Test
+    void absentCustodianLeavesLegacyDebouncedScanUnchanged() {
+        InfinityPickaxes plugin = mock(InfinityPickaxes.class);
+        ConfigManager configManager = mock(ConfigManager.class);
+        FileConfiguration config = mock(FileConfiguration.class);
+        PickaxeDuplicateService duplicateService = mock(PickaxeDuplicateService.class);
+        BukkitScheduler scheduler = mock(BukkitScheduler.class);
+        BukkitTask task = mock(BukkitTask.class);
+        Player player = mock(Player.class);
+        when(player.getName()).thenReturn("alice");
+        when(plugin.getConfigManager()).thenReturn(configManager);
+        when(configManager.getConfig()).thenReturn(config);
+        when(plugin.getDuplicateService()).thenReturn(duplicateService);
+        when(config.getLong("duplicate-protection.scan-interval-ticks", 1200L)).thenReturn(1200L);
+        when(config.getLong("duplicate-protection.debounce-ticks", 10L)).thenReturn(10L);
+        ArgumentCaptor<Runnable> settled = ArgumentCaptor.forClass(Runnable.class);
+
+        try (MockedStatic<Bukkit> bukkit = mockStatic(Bukkit.class)) {
+            bukkit.when(Bukkit::getScheduler).thenReturn(scheduler);
+            when(scheduler.runTaskTimer(eq(plugin), any(Runnable.class), eq(1200L), eq(1200L)))
+                    .thenReturn(task);
+            when(scheduler.runTaskLater(eq(plugin), settled.capture(), eq(10L))).thenReturn(task);
+            DuplicateDetectionListener listener = new DuplicateDetectionListener(plugin);
+
+            listener.onJoin(new PlayerJoinEvent(player, net.kyori.adventure.text.Component.text("joined")));
+            settled.getValue().run();
+
+            verify(duplicateService).scanOnlineAsync("automatic:join:alice", java.util.List.of());
             listener.stop();
         }
     }

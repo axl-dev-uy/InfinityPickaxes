@@ -89,6 +89,13 @@ duplicate-protection:
   debounce-ticks: 10
   container-recursion-depth: 3
 
+# Read-only comparison against Custodian. This never changes legacy duplicate
+# enforcement, item profiles, PDC, quarantine, replacement, or rekey behavior.
+custodian-shadow:
+  # Must match Custodian's server-id so native and shadow observations compare as one server.
+  server-id: "local"
+  heartbeat-ticks: 200
+
 # Visual Progress Bar Settings (used in Lore and Menus)
 progress-bar:
   total-bars: 20

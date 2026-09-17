@@ -20,16 +20,25 @@ import org.bukkit.scheduler.BukkitTask;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.Set;
+import java.util.Collection;
+import java.util.function.Consumer;
 
 public final class DuplicateDetectionListener implements Listener {
     private final InfinityPickaxes plugin;
+    private final Consumer<Collection<PhysicalStorageKey>> shadowScan;
     private final ScanDebouncer debouncer = new ScanDebouncer();
     private final Set<PhysicalStorageKey> pendingStorages = new LinkedHashSet<>();
     private BukkitTask periodicScan;
     private BukkitTask pendingScan;
 
     public DuplicateDetectionListener(InfinityPickaxes plugin) {
+        this(plugin, null);
+    }
+
+    public DuplicateDetectionListener(
+            InfinityPickaxes plugin, Consumer<Collection<PhysicalStorageKey>> shadowScan) {
         this.plugin = plugin;
+        this.shadowScan = shadowScan;
         start();
     }
 
@@ -112,6 +121,7 @@ public final class DuplicateDetectionListener implements Listener {
             pendingStorages.clear();
             pendingScan = null;
             plugin.getDuplicateService().scanOnlineAsync(scanActor, retainedStorages);
+            if (shadowScan != null) shadowScan.accept(retainedStorages);
         }, delay);
     }
 
