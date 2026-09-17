@@ -13,9 +13,12 @@ import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.entity.HumanEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.inventory.InventoryCloseEvent;
+import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryView;
+import org.bukkit.inventory.ItemStack;
 import org.bukkit.scheduler.BukkitScheduler;
 import org.bukkit.scheduler.BukkitTask;
 import org.junit.jupiter.api.Test;
@@ -43,6 +46,51 @@ import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.times;
 
 class DuplicateDetectionListenerTest {
+
+    @Test
+    void cursorClickAndDragOnlyScheduleDebouncedScansWhichRemainSlotBased() {
+        InfinityPickaxes plugin = mock(InfinityPickaxes.class);
+        ConfigManager configManager = mock(ConfigManager.class);
+        FileConfiguration config = mock(FileConfiguration.class);
+        PickaxeDuplicateService duplicateService = mock(PickaxeDuplicateService.class);
+        BukkitScheduler scheduler = mock(BukkitScheduler.class);
+        BukkitTask periodicTask = mock(BukkitTask.class);
+        BukkitTask delayedTask = mock(BukkitTask.class);
+        Player player = mock(Player.class);
+        ItemStack cursorGear = mock(ItemStack.class);
+        when(player.getName()).thenReturn("cursor");
+        when(plugin.getConfigManager()).thenReturn(configManager);
+        when(configManager.getConfig()).thenReturn(config);
+        when(plugin.getDuplicateService()).thenReturn(duplicateService);
+        when(config.getLong("duplicate-protection.scan-interval-ticks", 1200L)).thenReturn(1200L);
+        when(config.getLong("duplicate-protection.debounce-ticks", 10L)).thenReturn(10L);
+        when(duplicateService.isTracked(cursorGear)).thenReturn(true);
+        when(duplicateService.scanOnlineAsync(any(), any())).thenReturn(CompletableFuture.completedFuture(
+                new DuplicateScanResult(0, Map.of(), Set.of())));
+        InventoryClickEvent click = mock(InventoryClickEvent.class);
+        when(click.getCursor()).thenReturn(cursorGear);
+        when(click.getWhoClicked()).thenReturn(player);
+        InventoryDragEvent drag = mock(InventoryDragEvent.class);
+        when(drag.getOldCursor()).thenReturn(cursorGear);
+        when(drag.getWhoClicked()).thenReturn(player);
+        ArgumentCaptor<Runnable> settled = ArgumentCaptor.forClass(Runnable.class);
+
+        try (MockedStatic<Bukkit> bukkit = mockStatic(Bukkit.class)) {
+            bukkit.when(Bukkit::getScheduler).thenReturn(scheduler);
+            when(scheduler.runTaskTimer(eq(plugin), any(Runnable.class), eq(1200L), eq(1200L)))
+                    .thenReturn(periodicTask);
+            when(scheduler.runTaskLater(eq(plugin), settled.capture(), eq(10L))).thenReturn(delayedTask);
+            DuplicateDetectionListener listener = new DuplicateDetectionListener(plugin);
+
+            listener.onInventoryClick(click);
+            listener.onInventoryDrag(drag);
+            settled.getValue().run();
+
+            verify(duplicateService).scanOnlineAsync("automatic:inventory-drag:cursor", java.util.List.of());
+            verify(scheduler, times(1)).runTaskLater(eq(plugin), any(Runnable.class), eq(10L));
+            listener.stop();
+        }
+    }
 
     @Test
     void closingStorageAfterInsertionRetainsKeyAndRequestsScan() {

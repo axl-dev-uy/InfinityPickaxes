@@ -23,6 +23,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.bukkit.Location;
@@ -60,6 +61,60 @@ import static org.mockito.Mockito.when;
 
 class CustodianSettledShadowScannerTest {
     private static final Instant NOW = Instant.parse("2026-09-17T16:00:00Z");
+
+    @Test
+    void shadowSettledSnapshotMatchesLegacyCursorOnlyBoundary() {
+        InfinityPickaxes plugin = mock(InfinityPickaxes.class);
+        Server server = mock(Server.class);
+        BukkitScheduler scheduler = mock(BukkitScheduler.class);
+        BukkitTask task = mock(BukkitTask.class);
+        Logger logger = mock(Logger.class);
+        CustodianApi api = mock(CustodianApi.class);
+        ShadowContributor contributor = mock(ShadowContributor.class);
+        AuthorityHandle authority = AuthorityHandle.issuedByHost("infinitygear");
+        BridgeHandle bridge = new BridgeHandle(UUID.randomUUID(), "infinitygear");
+        UUID identity = UUID.randomUUID();
+        ItemStack gear = gear(identity);
+        AtomicReference<ItemStack[]> slots = new AtomicReference<>(new ItemStack[]{gear});
+        Player player = mock(Player.class);
+        PlayerInventory inventory = mock(PlayerInventory.class);
+        when(inventory.getContents()).thenAnswer(ignored -> slots.get());
+        when(player.getItemOnCursor()).thenReturn(gear);
+        when(player.getUniqueId()).thenReturn(UUID.randomUUID());
+        when(player.getInventory()).thenReturn(inventory);
+        Inventory emptyEnderChest = inventory(new ItemStack[0]);
+        when(player.getEnderChest()).thenReturn(emptyEnderChest);
+        InventoryView view = mock(InventoryView.class);
+        Inventory emptyTop = inventory(new ItemStack[0]);
+        when(view.getTopInventory()).thenReturn(emptyTop);
+        when(player.getOpenInventory()).thenReturn(view);
+        when(plugin.getServer()).thenReturn(server);
+        when(plugin.getLogger()).thenReturn(logger);
+        when(server.getScheduler()).thenReturn(scheduler);
+        doReturn(List.of(player)).when(server).getOnlinePlayers();
+        when(server.getWorlds()).thenReturn(List.of());
+        when(scheduler.runTaskTimer(eq(plugin), any(Runnable.class), eq(200L), eq(200L))).thenReturn(task);
+        when(contributor.startBridgeEpoch(authority, "local")).thenReturn(bridge);
+        when(api.adopt(authority, identity)).thenReturn(registration(identity));
+        when(contributor.contribute(eq(bridge), any())).thenAnswer(call -> {
+            ScopeContribution contribution = call.getArgument(1);
+            return new DuplicateAssessment(DuplicateAssessment.Status.ONE_ACTIVE, contribution.presences());
+        });
+
+        CustodianSettledShadowScanner scanner = new CustodianSettledShadowScanner(
+                plugin, api, contributor, authority, "local", Clock.fixed(NOW, ZoneOffset.UTC), 200L);
+        // inventory -> cursor: the shadow contributes nothing.
+        slots.set(new ItemStack[0]);
+        scanner.observe(List.of(), CompletableFuture.completedFuture(new DuplicateScanResult(0, Map.of(), Set.of())));
+        verify(contributor, never()).contribute(any(), any());
+        // cursor -> inventory: it contributes exactly the slot-backed item.
+        slots.set(new ItemStack[]{gear});
+        scanner.observe(List.of(), CompletableFuture.completedFuture(
+                new DuplicateScanResult(1, Map.of(identity, 1), Set.of())));
+        verify(contributor).contribute(eq(bridge), any());
+        verify(player, never()).getItemOnCursor();
+        scanner.close();
+    }
 
     @Test
     void settledSnapshotsReuseStableNativeIdsAndOnlySubmitPartialComparisons() {
