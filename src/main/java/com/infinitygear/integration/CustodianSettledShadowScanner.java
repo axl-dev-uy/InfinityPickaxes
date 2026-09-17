@@ -29,6 +29,7 @@ import java.util.concurrent.CompletionStage;
 import java.util.logging.Level;
 import org.bukkit.Location;
 import org.bukkit.World;
+import org.bukkit.block.BlockState;
 import org.bukkit.block.DoubleChest;
 import org.bukkit.entity.ChestedHorse;
 import org.bukkit.entity.Entity;
@@ -53,6 +54,7 @@ public final class CustodianSettledShadowScanner implements AutoCloseable {
     private final BridgeHandle bridge;
     private final Clock clock;
     private final BukkitTask heartbeatTask;
+    private Instant lastSnapshotAt = Instant.MIN;
     private boolean closed;
 
     public static Optional<CustodianSettledShadowScanner> connect(InfinityPickaxes plugin) {
@@ -122,24 +124,25 @@ public final class CustodianSettledShadowScanner implements AutoCloseable {
         Map<UUID, Integer> physicalInstances = new LinkedHashMap<>();
         Set<UUID> duplicates = new LinkedHashSet<>();
         try {
+            Instant observedAt = nextSnapshotAt();
             Set<PhysicalStorageKey> visited = new LinkedHashSet<>();
             for (Player player : plugin.getServer().getOnlinePlayers()) {
                 scanInventory(player.getInventory(), new Scope(
                         "player:" + player.getUniqueId() + ":inventory",
-                        "player:" + player.getUniqueId()), physicalInstances, duplicates);
+                        "player:" + player.getUniqueId()), observedAt, physicalInstances, duplicates);
                 scanInventory(player.getEnderChest(), new Scope(
                         "player:" + player.getUniqueId() + ":ender",
-                        "player:" + player.getUniqueId()), physicalInstances, duplicates);
+                        "player:" + player.getUniqueId()), observedAt, physicalInstances, duplicates);
                 scanPhysical(player.getOpenInventory().getTopInventory(), visited,
-                        physicalInstances, duplicates);
+                        observedAt, physicalInstances, duplicates);
             }
             for (PhysicalStorageKey retained : retainedStorages) {
                 retained.resolveInventory().ifPresent(inventory -> scanPhysical(
-                        inventory, visited, physicalInstances, duplicates));
+                        inventory, visited, observedAt, physicalInstances, duplicates));
             }
             for (World world : plugin.getServer().getWorlds()) {
                 for (Item item : world.getEntitiesByClass(Item.class)) {
-                    scanDrop(item, physicalInstances, duplicates);
+                    scanDrop(item, observedAt, physicalInstances, duplicates);
                 }
             }
         } catch (RuntimeException failure) {
@@ -147,6 +150,13 @@ public final class CustodianSettledShadowScanner implements AutoCloseable {
                     "Custodian settled shadow snapshot failed; legacy duplicate protection is unchanged.", failure);
         }
         return new ShadowOutcome(physicalInstances, duplicates);
+    }
+
+    private Instant nextSnapshotAt() {
+        Instant now = clock.instant();
+        if (!now.isAfter(lastSnapshotAt)) now = lastSnapshotAt.plusNanos(1);
+        lastSnapshotAt = now;
+        return now;
     }
 
     @Override
@@ -159,18 +169,20 @@ public final class CustodianSettledShadowScanner implements AutoCloseable {
     private void scanPhysical(
             Inventory inventory,
             Set<PhysicalStorageKey> visited,
+            Instant observedAt,
             Map<UUID, Integer> physicalInstances,
             Set<UUID> duplicates) {
         Optional<PhysicalStorageKey> key = PhysicalStorageKey.from(inventory);
         if (key.isEmpty() || !visited.add(key.get())) return;
         Scope scope = physicalScope(inventory);
         if (scope == null) return;
-        scanInventory(inventory, scope, physicalInstances, duplicates);
+        scanInventory(inventory, scope, observedAt, physicalInstances, duplicates);
     }
 
     private void scanInventory(
             Inventory inventory,
             Scope scope,
+            Instant observedAt,
             Map<UUID, Integer> physicalInstances,
             Set<UUID> duplicates) {
         if (inventory == null) return;
@@ -180,7 +192,8 @@ public final class CustodianSettledShadowScanner implements AutoCloseable {
             UUID identity = adopt(contents[slot]).orElse(null);
             if (identity == null) continue;
             byIdentity.computeIfAbsent(identity, ignored -> new ArrayList<>()).add(presence(
-                    identity, scope.id() + ":slot:" + slot, scope.location() + "/slot/" + slot));
+                    identity, scope.id() + ":slot:" + slot, scope.location() + "/slot/" + slot,
+                    observedAt));
         }
         byIdentity.forEach((identity, presences) -> submit(
                 identity, scope.id(), presences, physicalInstances, duplicates));
@@ -188,12 +201,14 @@ public final class CustodianSettledShadowScanner implements AutoCloseable {
 
     private void scanDrop(
             Item item,
+            Instant observedAt,
             Map<UUID, Integer> physicalInstances,
             Set<UUID> duplicates) {
         UUID identity = adopt(item.getItemStack()).orElse(null);
         if (identity == null) return;
         String scope = "drop:" + item.getUniqueId();
-        submit(identity, scope, List.of(presence(identity, scope + ":item", location(item.getLocation()))),
+        submit(identity, scope, List.of(presence(
+                        identity, scope + ":item", location(item.getLocation()), observedAt)),
                 physicalInstances, duplicates);
     }
 
@@ -203,10 +218,10 @@ public final class CustodianSettledShadowScanner implements AutoCloseable {
                 .map(result -> result.identity().identity());
     }
 
-    private PhysicalPresence presence(UUID identity, String instance, String location) {
-        Instant now = clock.instant();
-        ProcessEpoch opaqueEpoch = new ProcessEpoch(bridge.epochId(), "opaque", now, now);
-        return new PhysicalPresence(identity, opaqueEpoch, new PhysicalInstance(instance), location, now);
+    private PhysicalPresence presence(UUID identity, String instance, String location, Instant observedAt) {
+        ProcessEpoch opaqueEpoch = new ProcessEpoch(bridge.epochId(), "opaque", observedAt, observedAt);
+        return new PhysicalPresence(
+                identity, opaqueEpoch, new PhysicalInstance(instance), location, observedAt);
     }
 
     private void submit(
@@ -274,8 +289,11 @@ public final class CustodianSettledShadowScanner implements AutoCloseable {
     }
 
     private static String blockLocation(InventoryHolder holder) {
-        return holder == null || holder.getInventory().getLocation() == null
-                ? null : location(holder.getInventory().getLocation());
+        if (!(holder instanceof BlockState blockState)
+                || blockState.getWorld() == null || blockState.getLocation() == null) return null;
+        Location location = blockState.getLocation();
+        return blockState.getWorld().getUID() + ":" + location.getBlockX() + ":"
+                + location.getBlockY() + ":" + location.getBlockZ();
     }
 
     private static String location(Location location) {

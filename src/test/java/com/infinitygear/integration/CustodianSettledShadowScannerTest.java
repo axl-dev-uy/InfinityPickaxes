@@ -28,6 +28,8 @@ import java.util.logging.Logger;
 import org.bukkit.Location;
 import org.bukkit.Server;
 import org.bukkit.World;
+import org.bukkit.block.Container;
+import org.bukkit.block.DoubleChest;
 import org.bukkit.entity.Item;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.minecart.StorageMinecart;
@@ -135,12 +137,82 @@ class CustodianSettledShadowScannerTest {
         assertTrue(contributions.getAllValues().stream().allMatch(contribution ->
                 contribution.presences().stream().allMatch(presence ->
                         presence.epoch().id().equals(bridge.epochId()))));
+        assertEquals(1, contributions.getAllValues().subList(0, 3).stream()
+                .flatMap(contribution -> contribution.presences().stream())
+                .map(presence -> presence.observedAt()).distinct().count(),
+                "all scopes in one settled scan must share a snapshot generation");
+        assertTrue(contributions.getAllValues().get(3).presences().getFirst().observedAt()
+                .isAfter(contributions.getAllValues().getFirst().presences().getFirst().observedAt()),
+                "successive scans must advance generations even when the wall clock does not");
         verify(contributor, times(1)).startBridgeEpoch(authority, "local");
         verify(api, never()).startEpoch(any());
         verify(gear, never()).setItemMeta(any());
         verify(plugin, never()).getDuplicateService();
         scanner.close();
         verify(heartbeatTask).cancel();
+    }
+
+    @Test
+    void doubleChestScopeUsesDistinctBlockStatesWhenBothSidesExposeTheCombinedInventory() {
+        InfinityPickaxes plugin = mock(InfinityPickaxes.class);
+        Server server = mock(Server.class);
+        BukkitScheduler scheduler = mock(BukkitScheduler.class);
+        BukkitTask task = mock(BukkitTask.class);
+        Logger logger = mock(Logger.class);
+        CustodianApi api = mock(CustodianApi.class);
+        ShadowContributor contributor = mock(ShadowContributor.class);
+        AuthorityHandle authority = AuthorityHandle.issuedByHost("infinitygear");
+        BridgeHandle bridge = new BridgeHandle(UUID.randomUUID(), "infinitygear");
+        UUID identity = UUID.randomUUID();
+        ItemStack gear = gear(identity);
+        UUID worldId = UUID.randomUUID();
+        World world = mock(World.class);
+        when(world.getUID()).thenReturn(worldId);
+
+        Inventory combined = inventory(new ItemStack[]{gear});
+        when(combined.getLocation()).thenReturn(new Location(world, 9, 104, 0));
+        Container left = tileSide(world, 2, combined);
+        Container right = tileSide(world, 1, combined);
+        DoubleChest doubleChest = mock(DoubleChest.class);
+        when(doubleChest.getLeftSide()).thenReturn(left);
+        when(doubleChest.getRightSide()).thenReturn(right);
+        when(combined.getHolder()).thenReturn(doubleChest);
+
+        Player player = mock(Player.class);
+        PlayerInventory playerInventory = mock(PlayerInventory.class);
+        Inventory emptyEnderChest = inventory(new ItemStack[0]);
+        when(playerInventory.getContents()).thenReturn(new ItemStack[0]);
+        when(player.getUniqueId()).thenReturn(UUID.randomUUID());
+        when(player.getInventory()).thenReturn(playerInventory);
+        when(player.getEnderChest()).thenReturn(emptyEnderChest);
+        InventoryView view = mock(InventoryView.class);
+        when(view.getTopInventory()).thenReturn(combined);
+        when(player.getOpenInventory()).thenReturn(view);
+        when(plugin.getServer()).thenReturn(server);
+        when(plugin.getLogger()).thenReturn(logger);
+        when(server.getScheduler()).thenReturn(scheduler);
+        doReturn(List.of(player)).when(server).getOnlinePlayers();
+        when(server.getWorlds()).thenReturn(List.of());
+        when(scheduler.runTaskTimer(eq(plugin), any(Runnable.class), eq(200L), eq(200L))).thenReturn(task);
+        when(contributor.startBridgeEpoch(authority, "local")).thenReturn(bridge);
+        when(api.adopt(authority, identity)).thenReturn(registration(identity));
+        when(contributor.contribute(eq(bridge), any())).thenAnswer(call -> {
+            ScopeContribution contribution = call.getArgument(1);
+            return new DuplicateAssessment(DuplicateAssessment.Status.ONE_ACTIVE, contribution.presences());
+        });
+
+        CustodianSettledShadowScanner scanner = new CustodianSettledShadowScanner(
+                plugin, api, contributor, authority, "local", Clock.fixed(NOW, ZoneOffset.UTC), 200L);
+        scanner.observe(List.of(), CompletableFuture.completedFuture(
+                new DuplicateScanResult(1, Map.of(identity, 1), Set.of())));
+
+        ArgumentCaptor<ScopeContribution> contribution = ArgumentCaptor.forClass(ScopeContribution.class);
+        verify(contributor).contribute(eq(bridge), contribution.capture());
+        String expectedScope = "double-block:" + worldId + ":1:104:0:" + worldId + ":2:104:0";
+        assertEquals(expectedScope, contribution.getValue().scope().id());
+        assertEquals(expectedScope + ":slot:0",
+                contribution.getValue().presences().getFirst().instance().id());
+        scanner.close();
     }
 
     @Test
@@ -321,6 +393,14 @@ class CustodianSettledShadowScannerTest {
         Inventory inventory = mock(Inventory.class);
         when(inventory.getContents()).thenReturn(contents);
         return inventory;
+    }
+
+    private static Container tileSide(World world, int x, Inventory combined) {
+        Container holder = mock(Container.class);
+        when(holder.getWorld()).thenReturn(world);
+        when(holder.getLocation()).thenReturn(new Location(world, x, 104, 0));
+        when(holder.getInventory()).thenReturn(combined);
+        return holder;
     }
 
     private static ItemStack gear(UUID identity) {
