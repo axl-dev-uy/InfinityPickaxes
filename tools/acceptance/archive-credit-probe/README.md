@@ -43,7 +43,7 @@ and timeout paths. Run only one mode at a time and wait for the bounded dispatch
 poll between steps. Do not use `/reload` to simulate process restart.
 
 For a live physical credit, the server fixture additionally needs reviewed
-migration 14, `mining-delivery.archive-contract-enabled: true`, an explicitly
+migrations 14 and 15, `mining-delivery.archive-contract-enabled: true`, an explicitly
 approved ordinary guarded mining fingerprint, and an adopted XP pickaxe. These
 changes are not part of installing this inactive jar. The 2026-09-24 live pass
 restored the pretest configurations byte-for-byte and removed the probe from

@@ -134,7 +134,7 @@ Archive mining-credit subscription. The callback runs on the server thread and
 returns an asynchronous decision stage; Archive acknowledgment follows only a
 committed consumer decision. Enrollment starts after explicit asynchronous
 activation, uses a separate durable cursor, and never backfills older credits.
-Migration 14 must be installed separately before setting
+Migrations 14 and 15 must be installed separately before setting
 `mining-delivery.archive-contract-enabled: true`; both the migration and this
 setting remain unapplied to production. See the
 [delivery contract](docs/archive-credit-delivery-contract.md) and

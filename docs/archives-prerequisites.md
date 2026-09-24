@@ -11,9 +11,13 @@ acknowledgment, and stable post-commit delivery sequencing. Only completed
 credits with atomic XP receipts enter this subscription. The legacy mining
 inbox and `CreditedBlockEvent` do not acknowledge Archive delivery.
 
-Migration 14 adds only the Archive subscription, delivery, and order tables.
-It was applied and tested on the disposable MariaDB fixture only. Runtime
-bootstrap checks for the schema and never applies migration 14 automatically.
+Migration 14 adds only the Archive subscription, delivery, and order tables;
+it was applied and tested on the disposable MariaDB fixture only. The PR review
+then identified an unbounded poll over retained history. Proposed migration 15
+adds a pending-only sequencing queue and durable acknowledgment cursor, so idle
+polls avoid the exclusive enrollment lock and next-delivery reads seek past the
+acknowledged prefix. Runtime bootstrap checks for both schemas and applies
+neither automatically.
 `mining-delivery.archive-contract-enabled` remains false by default, and
 Archive must explicitly call `activate()` after registering a consumer.
 There is no legacy backfill. The locally built API artifact has not been

@@ -69,6 +69,25 @@ decision timing, ordered head blocking, false-return retry, and clean restart.
 It was a clean restart, not a forced-crash test; the real Archive reward
 consumer and claim path remain untested and unimplemented here.
 
+## PR review follow-up: bounded polling
+
+PR #1 review found that the original idle poll scanned all retained delivery
+rows while holding the subscription's exclusive lock, and that next-pending
+reads could scan an acknowledged prefix. Migration 15 and the matching store
+change add a pending-only sequencing queue and a durable sequence cursor. The
+schema and one-time backfill are specified in the
+[contract](archive-credit-delivery-contract.md#additive-migration-15-polling-bound-proposed-for-review).
+Migration 15 was applied only to separate empty disposable MariaDB scratch
+schemas, not to the earlier live acceptance schema. The MariaDB test seeds
+2,000 acknowledged deliveries, verifies that the next-pending plan uses the
+sequence primary-key range, and checks that an idle poll finishes while one
+receipt transaction holds a shared activation lock and another acquires one.
+It also checks upgrade recovery of an unsequenced delivery and cursor.
+After isolating its synthetic history rows from other tests, the complete
+fixture-backed suite passed **380/380, zero skipped**. A fresh Paper live pass
+with migration 15 has not been run; the first live pass above predates this
+polling improvement.
+
 ## Restored state and handoff
 
 After the test, Paper was stopped cleanly; the exact pretest AxMines and
@@ -86,4 +105,4 @@ published and the consumer independently implements a durable unique credit-ID
 reward-or-no-reward decision. The Archive consumer must compare immutable
 payloads on replay, return success only after its decision commits, and treat
 delivery acknowledgment as distinct from player claiming. Production migration
-14 and feature enablement still require separate approval.
+14–15 and feature enablement still require separate approval.

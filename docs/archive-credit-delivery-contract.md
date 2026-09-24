@@ -2,7 +2,7 @@
 
 `MiningCreditDeliveryService` is the implemented public `archives-api-v1` entry
 point. InfinityGear registers its implementation with Bukkit's services manager
-only when `mining-delivery.archive-contract-enabled: true` and migration 14 is
+only when `mining-delivery.archive-contract-enabled: true` and migrations 14–15 are
 present. The shipped setting is `false`. Archive loads that
 service, calls `register(Consumer)` on the server thread, and explicitly calls
 `activate()`. Registration supplies a live callback; activation is a separate,
@@ -76,17 +76,66 @@ INSERT IGNORE INTO infinitygear_schema_migrations(version) VALUES (14);
 
 The source `infinitygear_mining_credits.credit_id` is exactly `CHAR(36) CHARACTER
 SET ascii COLLATE ascii_bin NOT NULL UNIQUE`; the two foreign-key columns above
-match it. The source's current migration methods create their own tables and write
-their own `infinitygear_schema_migrations` markers. Version 10 already belongs to
-book lifecycle; the highest current marker is 13. The Archive migration method
-will therefore record 14 after successful DDL and seed insertion. There is no
-separate migration runner to take that step.
+match it. The source's migration methods create their own tables and write their
+own `infinitygear_schema_migrations` markers. Version 10 belongs to book
+lifecycle; 13 was the highest marker before this contract. The Archive migration
+method records 14 after successful DDL and seed insertion. There is no separate
+migration runner to take that step.
 
-The provider bootstrap checks for this schema but does not apply it. Migration
-14 was applied only to the named disposable MariaDB fixture for acceptance. Its
-future application to a persistent database requires separate authorization;
-the feature remains disabled by default until then. The API jar has been built
-locally but is not published for Archive integration yet. See the
+## Additive migration 15 (polling bound; proposed for review)
+
+Migration 14 remains exactly as approved. Migration 15 adds a pending-only queue
+and a durable acknowledgment cursor:
+
+```sql
+CREATE TABLE infinitygear_mining_archive_unsequenced (
+  credit_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
+  FOREIGN KEY (credit_id) REFERENCES infinitygear_mining_archive_deliveries(credit_id)
+) ENGINE=InnoDB;
+INSERT IGNORE INTO infinitygear_mining_archive_unsequenced(credit_id)
+SELECT d.credit_id FROM infinitygear_mining_archive_deliveries d
+LEFT JOIN infinitygear_mining_archive_order o ON o.credit_id=d.credit_id
+WHERE o.credit_id IS NULL;
+CREATE TABLE infinitygear_mining_archive_cursor (
+  subscription_id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
+  next_delivery_sequence BIGINT UNSIGNED NOT NULL,
+  FOREIGN KEY (subscription_id) REFERENCES infinitygear_mining_archive_subscription(subscription_id)
+) ENGINE=InnoDB;
+INSERT IGNORE INTO infinitygear_mining_archive_cursor(subscription_id,next_delivery_sequence)
+SELECT 'archive-v1',COALESCE((SELECT MIN(o.delivery_sequence)
+  FROM infinitygear_mining_archive_order o JOIN infinitygear_mining_archive_deliveries d
+  ON d.credit_id=o.credit_id WHERE d.acknowledged_at IS NULL),
+  (SELECT COALESCE(MAX(delivery_sequence),0)+1 FROM infinitygear_mining_archive_order));
+INSERT IGNORE INTO infinitygear_schema_migrations(version) VALUES (15);
+```
+
+Apply migration 15 only during an offline provider maintenance window; the
+backfill must not race an older provider's acknowledgments. The one-time
+backfill examines only existing Archive delivery/order rows. It
+does not enroll earlier mining credits or change any receipt, XP notification,
+custody, provenance, profile, or legacy record. The queue row is inserted in the
+same receipt transaction as a new Archive delivery, and is removed in the same
+transaction that assigns its order row. A crash on either side leaves exactly
+one durable state. An idle poll probes the pending-only queue's primary key and
+does not take the exclusive subscription lock. A nonempty poll takes that lock
+and sequences at most 100 queued IDs by the established canonical credit-ID
+tie break. Concurrent receipt transactions keep compatible shared locks.
+
+The cursor points to the first not-yet-acknowledged sequence, or to one past
+the largest assigned sequence when none is pending. Acknowledgment locks and
+advances the cursor in its own transaction without locking the activation row.
+The next-pending query seeks on the order table's primary key from this cursor;
+it does not scan an acknowledged prefix. Sequence gaps remain valid. An
+acknowledged row at the cursor or a changed payload fails closed. Migration 15's
+backfill may scan retained Archive history once during an explicitly scheduled
+upgrade; normal polling and acknowledgment do not.
+
+The provider bootstrap checks for both migrations but does not apply either.
+Migration 14 was applied only to the named disposable MariaDB fixture for live
+acceptance. Migration 15 is under review. Their future application to a
+persistent database requires separate authorization; the feature remains
+disabled by default until then. The API jar has been built locally but is not
+published for Archive integration yet. See the
 [live fixture record](archive-credit-delivery-live-acceptance.md).
 
 The receipt transaction takes `LOCK IN SHARE MODE` on the singleton subscription
@@ -95,11 +144,11 @@ hold shared locks together. Activation takes `FOR UPDATE` on the same primary-ke
 row before enabling it, so it waits for older enrollment transactions and excludes
 older credits without timestamps. Both locks must be acquired inside transactions;
 the receipt path already uses `READ COMMITTED` and `autocommit=false`. The worker
-briefly takes an exclusive lock on that row to sequence a bounded set of committed,
-unsequenced deliveries. This can temporarily wait behind receipts, but receipts do
-not take exclusive locks against each other. The sequence worker commits its batch
-before dispatching the first credit. It never assigns sequence numbers from inside
-the concurrent XP transactions.
+briefly takes an exclusive lock on that row only when the pending-only queue has
+work, to sequence a bounded set of committed deliveries. This can temporarily
+wait behind receipts, but receipts do not take exclusive locks against each
+other. The sequence worker commits its batch before dispatching the first credit.
+It never assigns sequence numbers from inside concurrent XP transactions.
 
 MariaDB documents shared and exclusive InnoDB row locks under
 [`LOCK IN SHARE MODE`](https://mariadb.com/docs/server/reference/sql-statements/data-manipulation/selecting-data/for-update)

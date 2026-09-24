@@ -18,7 +18,7 @@ public final class MariaMiningArchiveDelivery implements MiningCreditDeliveryPro
 
     public MariaMiningArchiveDelivery(DataSource source) { this.source = Objects.requireNonNull(source); }
 
-    /** Additive migration 14. Repeated startup preserves the active subscription and all receipts. */
+    /** Additive migrations 14 and 15. Never invoked by normal provider bootstrap. */
     public void migrate() throws SQLException {
         new MariaMiningJournal(source).migrate();
         try (var c = source.getConnection(); var s = c.createStatement()) {
@@ -37,6 +37,31 @@ public final class MariaMiningArchiveDelivery implements MiningCreditDeliveryPro
                     + "credit_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL UNIQUE,"
                     + "FOREIGN KEY (credit_id) REFERENCES infinitygear_mining_archive_deliveries(credit_id)) ENGINE=InnoDB");
             s.executeUpdate("INSERT IGNORE INTO infinitygear_schema_migrations(version) VALUES (14)");
+            s.executeUpdate("CREATE TABLE IF NOT EXISTS infinitygear_mining_archive_unsequenced ("
+                    + "credit_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,"
+                    + "FOREIGN KEY (credit_id) REFERENCES infinitygear_mining_archive_deliveries(credit_id)) ENGINE=InnoDB");
+            s.executeUpdate("CREATE TABLE IF NOT EXISTS infinitygear_mining_archive_cursor ("
+                    + "subscription_id VARCHAR(32) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,"
+                    + "next_delivery_sequence BIGINT UNSIGNED NOT NULL,"
+                    + "FOREIGN KEY (subscription_id) REFERENCES infinitygear_mining_archive_subscription(subscription_id)) ENGINE=InnoDB");
+            // The historical backfill is an explicit one-time migration step,
+            // never a recurring scan on migration checks or normal startup.
+            boolean migration15Present;
+            try (var rows = s.executeQuery("SELECT 1 FROM infinitygear_schema_migrations WHERE version=15")) {
+                migration15Present = rows.next();
+            }
+            if (!migration15Present) {
+                s.executeUpdate("INSERT IGNORE INTO infinitygear_mining_archive_unsequenced(credit_id) "
+                        + "SELECT d.credit_id FROM infinitygear_mining_archive_deliveries d "
+                        + "LEFT JOIN infinitygear_mining_archive_order o ON o.credit_id=d.credit_id "
+                        + "WHERE o.credit_id IS NULL");
+                s.executeUpdate("INSERT IGNORE INTO infinitygear_mining_archive_cursor(subscription_id,next_delivery_sequence) "
+                        + "SELECT 'archive-v1',COALESCE((SELECT MIN(o.delivery_sequence) "
+                        + "FROM infinitygear_mining_archive_order o JOIN infinitygear_mining_archive_deliveries d "
+                        + "ON d.credit_id=o.credit_id WHERE d.acknowledged_at IS NULL),"
+                        + "(SELECT COALESCE(MAX(delivery_sequence),0)+1 FROM infinitygear_mining_archive_order))");
+                s.executeUpdate("INSERT IGNORE INTO infinitygear_schema_migrations(version) VALUES (15)");
+            }
         }
         requireSchema();
     }
@@ -44,9 +69,9 @@ public final class MariaMiningArchiveDelivery implements MiningCreditDeliveryPro
     /** Read-only bootstrap check after the reviewed migration is installed. */
     public void requireSchema() {
         try (var c = source.getConnection(); var s = c.prepareStatement(
-                "SELECT 1 FROM infinitygear_schema_migrations WHERE version=14")) {
+                "SELECT 1 FROM infinitygear_schema_migrations WHERE version=15")) {
             try (var rows = s.executeQuery()) {
-                if (!rows.next()) throw new IllegalStateException("Archive delivery migration 14 is missing");
+                if (!rows.next()) throw new IllegalStateException("Archive delivery migration 15 is missing");
             }
             try (var check = c.prepareStatement("SELECT active FROM infinitygear_mining_archive_subscription WHERE subscription_id=?")) {
                 check.setString(1, SUBSCRIBER);
@@ -57,6 +82,15 @@ public final class MariaMiningArchiveDelivery implements MiningCreditDeliveryPro
             try (var check = c.prepareStatement("SELECT d.credit_id,o.delivery_sequence "
                     + "FROM infinitygear_mining_archive_deliveries d "
                     + "LEFT JOIN infinitygear_mining_archive_order o ON o.credit_id=d.credit_id LIMIT 0")) {
+                check.executeQuery().close();
+            }
+            try (var check = c.prepareStatement("SELECT next_delivery_sequence FROM infinitygear_mining_archive_cursor WHERE subscription_id=?")) {
+                check.setString(1, SUBSCRIBER);
+                try (var rows = check.executeQuery()) {
+                    if (!rows.next()) throw new IllegalStateException("Archive delivery cursor is missing");
+                }
+            }
+            try (var check = c.prepareStatement("SELECT credit_id FROM infinitygear_mining_archive_unsequenced LIMIT 0")) {
                 check.executeQuery().close();
             }
         } catch (SQLException failure) { throw new IllegalStateException("Archive delivery schema unavailable", failure); }
@@ -93,25 +127,40 @@ public final class MariaMiningArchiveDelivery implements MiningCreditDeliveryPro
             s.setString(3, credit.creditId().toString());
             if (s.executeUpdate() != 1) throw new IllegalStateException("Only completed credits with atomic XP receipts can enroll");
         }
+        // The queue is committed with the receipt and delivery. Its size tracks only
+        // work not yet sequenced, so an idle poll never scans retained history.
+        try (var s = c.prepareStatement("INSERT INTO infinitygear_mining_archive_unsequenced(credit_id) VALUES (?)")) {
+            s.setString(1, credit.creditId().toString());
+            s.executeUpdate();
+        }
     }
 
     /** A short exclusive gate makes one committed enrollment batch visible before sequencing.
      * Gaps are permitted; sequence values are stable across restart and never reused. */
     public int sequencePending(int limit) {
         if (limit < 1 || limit > 1000) throw new IllegalArgumentException("Sequence batch size must be 1..1000");
+        // A point into the pending-only primary key avoids taking the exclusive
+        // enrollment gate on every idle poll. A concurrent commit can wait for
+        // the next poll without changing its activation/order boundary.
+        try (var c = source.getConnection(); var s = c.prepareStatement(
+                "SELECT credit_id FROM infinitygear_mining_archive_unsequenced ORDER BY credit_id LIMIT 1")) {
+            try (var rows = s.executeQuery()) { if (!rows.next()) return 0; }
+        } catch (SQLException failure) { throw new IllegalStateException("Archive sequencing check failed", failure); }
         try (var c = source.getConnection()) {
             c.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
             c.setAutoCommit(false);
             try {
                 subscription(c, " FOR UPDATE");
                 var ids = new ArrayList<String>();
-                try (var s = c.prepareStatement("SELECT d.credit_id FROM infinitygear_mining_archive_deliveries d "
-                        + "LEFT JOIN infinitygear_mining_archive_order o ON o.credit_id=d.credit_id "
-                        + "WHERE o.credit_id IS NULL ORDER BY d.credit_id LIMIT ?")) {
+                try (var s = c.prepareStatement("SELECT credit_id FROM infinitygear_mining_archive_unsequenced "
+                        + "ORDER BY credit_id LIMIT ?")) {
                     s.setInt(1, limit);
                     try (var rows = s.executeQuery()) { while (rows.next()) ids.add(rows.getString(1)); }
                 }
                 try (var s = c.prepareStatement("INSERT INTO infinitygear_mining_archive_order(credit_id) VALUES (?)")) {
+                    for (var id : ids) { s.setString(1, id); s.executeUpdate(); }
+                }
+                try (var s = c.prepareStatement("DELETE FROM infinitygear_mining_archive_unsequenced WHERE credit_id=?")) {
                     for (var id : ids) { s.setString(1, id); s.executeUpdate(); }
                 }
                 c.commit();
@@ -125,15 +174,19 @@ public final class MariaMiningArchiveDelivery implements MiningCreditDeliveryPro
         if (limit != 1) throw new IllegalArgumentException("Archive delivery must process one ordered credit");
         // Sequencing is idempotent and also recovers enrollments committed before a crash.
         sequencePending(100);
-        try (var c = source.getConnection(); var s = c.prepareStatement("SELECT m.*,r.credit_id AS receipt_credit_id,d.digest_version,d.payload_sha256 "
-                + "FROM infinitygear_mining_archive_order o "
-                + "JOIN infinitygear_mining_archive_deliveries d ON d.credit_id=o.credit_id "
-                + "JOIN infinitygear_mining_credits m ON m.credit_id=d.credit_id "
+        try (var c = source.getConnection(); var s = c.prepareStatement("SELECT m.*,r.credit_id AS receipt_credit_id,d.digest_version,d.payload_sha256,d.acknowledged_at "
+                + "FROM infinitygear_mining_archive_cursor curs "
+                + "STRAIGHT_JOIN infinitygear_mining_archive_order o FORCE INDEX(PRIMARY) "
+                + "ON o.delivery_sequence>=curs.next_delivery_sequence "
+                + "STRAIGHT_JOIN infinitygear_mining_archive_deliveries d ON d.credit_id=o.credit_id "
+                + "STRAIGHT_JOIN infinitygear_mining_credits m ON m.credit_id=d.credit_id "
                 + "LEFT JOIN infinitygear_mining_xp_receipts r ON r.credit_id=m.credit_id "
-                + "WHERE d.acknowledged_at IS NULL "
-                + "ORDER BY o.delivery_sequence LIMIT 1")) {
+                + "WHERE curs.subscription_id=? ORDER BY o.delivery_sequence LIMIT 1")) {
+            s.setString(1, SUBSCRIBER);
             try (var rows = s.executeQuery()) {
                 if (!rows.next()) return List.of();
+                if (rows.getTimestamp("acknowledged_at") != null)
+                    throw new IllegalStateException("Archive delivery cursor points at an acknowledged credit");
                 if (!"COMPLETED".equals(rows.getString("state")) || rows.getString("receipt_credit_id") == null)
                     throw new IllegalStateException("Archive delivery lacks a completed credit and XP receipt");
                 var credit = MariaMiningJournal.readCredit(rows);
@@ -149,6 +202,17 @@ public final class MariaMiningArchiveDelivery implements MiningCreditDeliveryPro
             c.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
             c.setAutoCommit(false);
             try {
+                long nextSequence;
+                // Acknowledgments serialize on their own cursor, not the receipt
+                // enrollment gate. The cursor is advanced with the acknowledgment.
+                try (var s = c.prepareStatement("SELECT next_delivery_sequence FROM infinitygear_mining_archive_cursor "
+                        + "WHERE subscription_id=? FOR UPDATE")) {
+                    s.setString(1, SUBSCRIBER);
+                    try (var rows = s.executeQuery()) {
+                        if (!rows.next()) throw new IllegalStateException("Archive delivery cursor is missing");
+                        nextSequence = rows.getLong(1);
+                    }
+                }
                 boolean alreadyAcknowledged;
                 try (var s = c.prepareStatement("SELECT m.*,d.digest_version,d.payload_sha256,d.acknowledged_at,o.delivery_sequence "
                         + "FROM infinitygear_mining_archive_deliveries d "
@@ -164,19 +228,28 @@ public final class MariaMiningArchiveDelivery implements MiningCreditDeliveryPro
                     }
                 }
                 if (alreadyAcknowledged) { c.commit(); return; }
-                // Never advance past an earlier undecided credit, even after a stale callback.
-                try (var s = c.prepareStatement("SELECT o.credit_id FROM infinitygear_mining_archive_order o "
-                        + "JOIN infinitygear_mining_archive_deliveries d ON d.credit_id=o.credit_id "
-                        + "WHERE d.acknowledged_at IS NULL ORDER BY o.delivery_sequence LIMIT 1")) {
+                long headSequence;
+                // Seek from the durable cursor; retained acknowledged history is
+                // never examined, even when it contains millions of rows.
+                try (var s = c.prepareStatement("SELECT credit_id,delivery_sequence FROM infinitygear_mining_archive_order FORCE INDEX(PRIMARY) "
+                        + "WHERE delivery_sequence>=? ORDER BY delivery_sequence LIMIT 1")) {
+                    s.setLong(1, nextSequence);
                     try (var rows = s.executeQuery()) {
-                        if (rows.next() && !creditId.toString().equals(rows.getString(1)))
+                        if (!rows.next() || !creditId.toString().equals(rows.getString(1)))
                             throw new IllegalStateException("Archive acknowledgment would skip an earlier credit");
+                        headSequence = rows.getLong(2);
                     }
                 }
                 try (var s = c.prepareStatement("UPDATE infinitygear_mining_archive_deliveries "
                         + "SET acknowledged_at=COALESCE(acknowledged_at,CURRENT_TIMESTAMP(6)) WHERE credit_id=?")) {
                     s.setString(1, creditId.toString());
                     if (s.executeUpdate() != 1) throw new IllegalStateException("Archive delivery disappeared");
+                }
+                try (var s = c.prepareStatement("UPDATE infinitygear_mining_archive_cursor "
+                        + "SET next_delivery_sequence=? WHERE subscription_id=?")) {
+                    s.setLong(1, Math.addExact(headSequence, 1));
+                    s.setString(2, SUBSCRIBER);
+                    if (s.executeUpdate() != 1) throw new IllegalStateException("Archive delivery cursor disappeared");
                 }
                 c.commit();
             } catch (SQLException | RuntimeException failure) { c.rollback(); throw failure; }
