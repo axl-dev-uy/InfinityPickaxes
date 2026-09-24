@@ -1,0 +1,3 @@
+# Disposable Paper fixture only. Do not install in production.
+enabled: false
+fixture-world-uuid: 'd3032525-7129-42c2-b2be-e84fff3e90a9'

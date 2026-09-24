@@ -129,6 +129,18 @@ reports `book-application` only while that participant, MariaDB migration and an
 explicit authority are live. The aggregate `book-lifecycle` capability remains
 false; replacement, removal, transfer and fusion are not exposed.
 
+`com.infinitygear.api.v1.MiningCreditDeliveryService` is the receipt-backed
+Archive mining-credit subscription. The callback runs on the server thread and
+returns an asynchronous decision stage; Archive acknowledgment follows only a
+committed consumer decision. Enrollment starts after explicit asynchronous
+activation, uses a separate durable cursor, and never backfills older credits.
+Migrations 14 and 15 must be installed separately before setting
+`mining-delivery.archive-contract-enabled: true`; both the migration and this
+setting remain unapplied to production. See the
+[delivery contract](docs/archive-credit-delivery-contract.md) and
+[disposable live test](docs/archive-credit-delivery-live-acceptance.md). The API
+jar is built locally but has not yet been published for Archive integration.
+
 `com.infinitypickaxes.api.InfinityPickaxesAPI` and legacy model/manager accessors remain deprecated adapters. They represent only `infinitygear:pickaxe`; non-pickaxe profiles return empty/null instead of masquerading as pickaxes. Generalized `GearEnchantChangeEvent` fires alongside compatible legacy pickaxe events for migrated pickaxe operations, and cancellation remains authoritative.
 
 ## Commands and permissions

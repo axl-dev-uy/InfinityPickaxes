@@ -24,6 +24,7 @@ public final class ArchiveIntegrationBootstrap implements AutoCloseable {
     private TrackedBookApplicationService bookApplication;
     private MiningCreditConsumer creditConsumer;
     private MiningNotificationDispatcher dispatcher;
+    private MiningCreditDeliveryProvider archiveDeliveryProvider;
     private MariaSingleServerCustody custody;
     private BukkitTask dispatchTask;
     private volatile boolean mariaQuarantineReady;
@@ -44,18 +45,21 @@ public final class ArchiveIntegrationBootstrap implements AutoCloseable {
             return;
         }
         String approvedImportSource = config.getString("quarantine-approved-import-source-id", "");
+        boolean archiveDeliveryEnabled = config.getBoolean("mining-delivery.archive-contract-enabled", false);
         final MariaBookLedger ledger;
         final MariaMiningJournal miningJournal;
         final MariaMiningXpLedger xpLedger;
         final MariaMiningCreditInbox inbox;
         final MariaBookLifecycleTransaction bookLifecycle;
         final MariaQuarantineAuthority quarantineAuthority;
+        final MariaMiningArchiveDelivery archiveDelivery;
         try {
             var source = new DriverDataSource(config.getString("url"), config.getString("username", ""), config.getString("password", ""));
             custody = new MariaSingleServerCustody(source, serverId);
             ledger = new MariaBookLedger(source);
             miningJournal = new MariaMiningJournal(source);
-            xpLedger = new MariaMiningXpLedger(source);
+            archiveDelivery = archiveDeliveryEnabled ? new MariaMiningArchiveDelivery(source) : null;
+            xpLedger = new MariaMiningXpLedger(source, archiveDelivery);
             inbox = new MariaMiningCreditInbox(source);
             bookLifecycle = new MariaBookLifecycleTransaction(source);
             quarantineAuthority = new MariaQuarantineAuthority(source, custody);
@@ -68,6 +72,7 @@ public final class ArchiveIntegrationBootstrap implements AutoCloseable {
         long timeout = Math.max(1, config.getLong("mining-delivery.acceptance-timeout-millis", 5000));
         tasks.database(() -> {
             ledger.migrate(); miningJournal.migrate(); xpLedger.migrate(); inbox.migrate(); bookLifecycle.migrate();
+            if (archiveDelivery != null) archiveDelivery.requireSchema();
             custody.migrateAndClaimDeployment();
             if (mariaQuarantine) {
                 quarantineAuthority.migrate();
@@ -105,6 +110,11 @@ public final class ArchiveIntegrationBootstrap implements AutoCloseable {
             creditConsumer = new MiningCreditConsumer(tasks, inbox);
             dispatcher = new MiningNotificationDispatcher(tasks, miningJournal, creditConsumer,
                     batchSize, Duration.ofMillis(timeout));
+            if (archiveDelivery != null) {
+                archiveDeliveryProvider = new MiningCreditDeliveryProvider(tasks, archiveDelivery, Duration.ofMillis(timeout));
+                plugin.getServer().getServicesManager().register(com.infinitygear.api.v1.MiningCreditDeliveryService.class,
+                        archiveDeliveryProvider, plugin, ServicePriority.Normal);
+            }
             completionReceiver = new MiningCompletionReceiver(plugin, tasks, xpLedger, incidents,
                     this::infrastructureReady);
             plugin.getServer().getServicesManager().register(MiningAuthority.Receiver.class,
@@ -135,6 +145,12 @@ public final class ArchiveIntegrationBootstrap implements AutoCloseable {
                 plugin.getLogger().warning("Mining credit outbox retained " + batch.deferred()
                         + " deferred and " + batch.failed().size() + " failed credit(s); operator inspection required");
             }
+        });
+        MiningCreditDeliveryProvider archive = archiveDeliveryProvider;
+        if (archive != null) archive.drain().whenComplete((batch, failure) -> {
+            if (failure != null && !closed)
+                plugin.getLogger().warning("Archive credit delivery retained its pending head ("
+                        + failure.getClass().getSimpleName() + ")");
         });
     }
 
@@ -195,6 +211,11 @@ public final class ArchiveIntegrationBootstrap implements AutoCloseable {
         if (dispatcher != null) dispatcher.close();
         if (creditConsumer != null) creditConsumer.close();
         plugin.setXpActivation(null);
-        tasks.close();
+        if (archiveDeliveryProvider == null) tasks.close();
+        else {
+            plugin.getServer().getServicesManager().unregister(
+                    com.infinitygear.api.v1.MiningCreditDeliveryService.class, archiveDeliveryProvider);
+            archiveDeliveryProvider.shutdown().whenComplete((ignored, failure) -> tasks.close());
+        }
     }
 }

@@ -14,6 +14,9 @@ quarantine-approved-import-source-id: ''
 
 # Bounded receipt-gated credit delivery. Failed/deferred rows remain in the outbox.
 mining-delivery:
+  # Requires separately installed Archive delivery migrations 14 and 15. The public service
+  # is published only when this is true; Archive must still explicitly call activate().
+  archive-contract-enabled: false
   batch-size: 100
   interval-ticks: 100
   acceptance-timeout-millis: 5000

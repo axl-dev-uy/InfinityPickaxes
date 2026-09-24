@@ -1,0 +1,12 @@
+name: ArchiveCreditProbe
+version: 1.0.0
+main: com.infinitygear.acceptance.ArchiveCreditProbe
+api-version: '1.21.11'
+depend: [InfinityGear]
+commands:
+  creditprobe:
+    description: Fixture-only durable Archive credit delivery probe
+    permission: archivecreditprobe.admin
+permissions:
+  archivecreditprobe.admin:
+    default: op

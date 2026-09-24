@@ -33,7 +33,7 @@ class ArchiveContractsTest {
     }
     @Test void dtoSignaturesDoNotExposeImplementationPackages() {
         for (Class<?> type : List.of(ArchiveIntegrationService.class, BookLedger.class, BookIssuanceService.class,
-                MiningAuthority.class, MiningCompletion.class, MiningCredit.class,
+                MiningAuthority.class, MiningCompletion.class, MiningCredit.class, MiningCreditDeliveryService.class,
                 ProvenancePolicy.class, ProvenanceTransition.class,
                 BookLifecycleRequest.class, BookLifecycleTransaction.class,
                 BookApplicationService.class)) check(type);
