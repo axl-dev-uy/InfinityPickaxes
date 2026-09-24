@@ -56,6 +56,7 @@ public class InfinityPickaxes extends JavaPlugin {
     private MoneyGateway moneyGateway;
     private com.infinitygear.integration.ArchiveIntegrationBootstrap archiveIntegration;
     private com.infinitygear.mining.XpActivationService xpActivation;
+    private com.infinitygear.integration.CustodianSettledShadowScanner custodianShadow;
 
     @Override
     public void onEnable() {
@@ -129,6 +130,14 @@ public class InfinityPickaxes extends JavaPlugin {
         this.guiManager = new GuiManager(this);
         this.stationManager = new StationManager(this);
         this.archiveIntegration = new com.infinitygear.integration.ArchiveIntegrationBootstrap(this);
+        if (getServer().getPluginManager().isPluginEnabled("Custodian")) {
+            try {
+                this.custodianShadow = com.infinitygear.integration.CustodianSettledShadowScanner
+                        .connect(this).orElse(null);
+            } catch (LinkageError unavailable) {
+                getLogger().warning("Custodian API is unavailable; legacy duplicate protection remains authoritative.");
+            }
+        }
 
         int socketsCount = enchantManager.getAllSockets().size();
         boolean ecoPresent = enchantManager.getEcoHook().isEcoEnchantsPresent();
@@ -156,7 +165,8 @@ public class InfinityPickaxes extends JavaPlugin {
 
         this.heldListener = new PickaxeHeldListener(this);
         pm.registerEvents(this.heldListener, this);
-        this.duplicateListener = new DuplicateDetectionListener(this);
+        this.duplicateListener = new DuplicateDetectionListener(this,
+                custodianShadow == null ? null : custodianShadow::observe);
         pm.registerEvents(this.duplicateListener, this);
 
         // 4. Register PlaceholderAPI Hook if present
@@ -239,6 +249,7 @@ public class InfinityPickaxes extends JavaPlugin {
     public void onDisable() {
         if (archiveIntegration != null) archiveIntegration.close();
         if (duplicateListener != null) duplicateListener.stop();
+        if (custodianShadow != null) custodianShadow.close();
 
         // 1. Close any open CustomGui inventories
         for (Player p : Bukkit.getOnlinePlayers()) {

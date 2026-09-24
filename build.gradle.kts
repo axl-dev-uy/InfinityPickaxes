@@ -30,6 +30,8 @@ dependencies {
     compileOnly("com.github.MilkBowl:VaultAPI:1.7.1")
 
     implementation("org.xerial:sqlite-jdbc:3.50.3.0")
+    compileOnly("com.axl.custodian:custodian-api:0.1.0-SNAPSHOT")
+    testImplementation("com.axl.custodian:custodian-api:0.1.0-SNAPSHOT")
 
     testImplementation(platform("org.junit:junit-bom:5.13.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")

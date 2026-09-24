@@ -6,7 +6,7 @@ author: aland
 description: Persistent profile-driven levelable gear with safe enchantment stations and duplicate quarantine.
 provides: [InfinityPickaxes]
 depend: [EcoEnchants, eco]
-softdepend: [PlaceholderAPI, WorldGuard, Vault, Nexo]
+softdepend: [PlaceholderAPI, WorldGuard, Vault, Nexo, Custodian]
 libraries:
   - org.mariadb.jdbc:mariadb-java-client:3.5.6
 

@@ -33,6 +33,7 @@ import org.mockito.MockedStatic;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -46,6 +47,66 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class PhysicalStorageScannerTest {
+
+    @Test
+    void settledLegacyScanExcludesCursorOnlyItemsAcrossInventoryAndContainerMoves() throws Exception {
+        InfinityPickaxes plugin = mock(InfinityPickaxes.class);
+        DuplicateStore store = mock(DuplicateStore.class);
+        when(store.loadRestrictedUuids()).thenReturn(Set.of());
+        PickaxeDuplicateService service = new PickaxeDuplicateService(plugin, store);
+        UUID uuid = UUID.randomUUID();
+        ItemStack gear = mock(ItemStack.class);
+        when(gear.getAmount()).thenReturn(1);
+        AtomicReference<ItemStack[]> playerSlots = new AtomicReference<>(new ItemStack[]{gear});
+        AtomicReference<ItemStack[]> containerSlots = new AtomicReference<>(new ItemStack[0]);
+
+        PlayerInventory personal = mock(PlayerInventory.class);
+        when(personal.getSize()).thenAnswer(ignored -> playerSlots.get().length);
+        when(personal.getItem(org.mockito.ArgumentMatchers.anyInt()))
+                .thenAnswer(call -> playerSlots.get()[call.getArgument(0)]);
+        Inventory container = mock(Inventory.class);
+        when(container.getSize()).thenAnswer(ignored -> containerSlots.get().length);
+        when(container.getItem(org.mockito.ArgumentMatchers.anyInt()))
+                .thenAnswer(call -> containerSlots.get()[call.getArgument(0)]);
+        Container holder = blockContainer(UUID.randomUUID(), 3, 64, 9);
+        when(container.getHolder()).thenReturn(holder);
+
+        Player player = playerViewing("cursor", container);
+        when(player.getInventory()).thenReturn(personal);
+        // This is deliberately never read by the settled scanner.
+        when(player.getItemOnCursor()).thenReturn(gear);
+
+        var identity = new TrackedItemData.Identity(uuid, TrackedKind.GEAR,
+                "infinitygear:cursor-test", 1, false);
+        try (MockedStatic<Bukkit> bukkit = mockStatic(Bukkit.class);
+             MockedStatic<TrackedItemData> tracked = mockStatic(TrackedItemData.class)) {
+            bukkit.when(Bukkit::getOnlinePlayers).thenReturn(List.of(player));
+            bukkit.when(Bukkit::getWorlds).thenReturn(List.of());
+            tracked.when(() -> TrackedItemData.readRaw(gear)).thenReturn(identity);
+
+            // inventory -> cursor: the settled scan sees no item.
+            playerSlots.set(new ItemStack[0]);
+            assertEquals(0, service.scanOnline("test:inventory-to-cursor").itemsScanned());
+
+            // cursor -> inventory: it becomes visible again.
+            playerSlots.set(new ItemStack[]{gear});
+            assertEquals(1, service.scanOnline("test:cursor-to-inventory").itemsScanned());
+
+            // cursor -> physical container: it is visible through the container scope.
+            playerSlots.set(new ItemStack[0]);
+            containerSlots.set(new ItemStack[]{gear});
+            assertEquals(1, service.scanOnline("test:cursor-to-container").itemsScanned());
+
+            // A duplicate with one copy cursor-only is still one observed physical instance.
+            playerSlots.set(new ItemStack[]{gear});
+            containerSlots.set(new ItemStack[0]);
+            DuplicateScanResult cursorOnlyDuplicate = service.scanOnline("test:cursor-only-duplicate");
+            assertEquals(1, cursorOnlyDuplicate.physicalInstanceCounts().get(uuid));
+            assertTrue(cursorOnlyDuplicate.duplicatesDetected().isEmpty());
+            verify(player, never()).getItemOnCursor();
+            verify(store, never()).quarantine(eq(uuid), anyString(), anyString(), anyList());
+        }
+    }
 
     @Test
     void persistedRestrictedArmorIsUnequippedWithOnlyOneVisibleCopy() throws Exception {
@@ -78,6 +139,7 @@ class PhysicalStorageScannerTest {
             DuplicateScanResult result = service.scanOnline("automatic:join:returning");
 
             assertEquals(1, result.itemsScanned());
+            assertEquals(1, result.physicalInstanceCounts().get(uuid));
             assertTrue(result.duplicatesDetected().isEmpty());
             verify(personal).setItem(EquipmentSlot.CHEST, null);
             verify(personal).addItem(armor);
@@ -125,6 +187,7 @@ class PhysicalStorageScannerTest {
             DuplicateScanResult result = service.scanOnline("test:armor-profile");
 
             assertEquals(2, result.itemsScanned());
+            assertEquals(2, result.physicalInstanceCounts().get(uuid));
             assertTrue(result.duplicatesDetected().contains(uuid));
             verify(store).quarantine(eq(uuid), eq(TrackedKind.GEAR.name()), eq("infinitygear:armor"),
                     anyString(), eq("test:armor-profile"), anyList());

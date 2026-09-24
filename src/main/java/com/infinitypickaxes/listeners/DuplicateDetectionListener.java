@@ -1,6 +1,7 @@
 package com.infinitypickaxes.listeners;
 
 import com.infinitypickaxes.InfinityPickaxes;
+import com.infinitypickaxes.core.duplicate.DuplicateScanResult;
 import com.infinitypickaxes.core.duplicate.PhysicalStorageKey;
 import org.bukkit.Bukkit;
 import org.bukkit.event.EventHandler;
@@ -20,16 +21,27 @@ import org.bukkit.scheduler.BukkitTask;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.Set;
+import java.util.Collection;
+import java.util.concurrent.CompletionStage;
+import java.util.function.BiConsumer;
 
 public final class DuplicateDetectionListener implements Listener {
     private final InfinityPickaxes plugin;
+    private final BiConsumer<Collection<PhysicalStorageKey>, CompletionStage<DuplicateScanResult>> shadowScan;
     private final ScanDebouncer debouncer = new ScanDebouncer();
     private final Set<PhysicalStorageKey> pendingStorages = new LinkedHashSet<>();
     private BukkitTask periodicScan;
     private BukkitTask pendingScan;
 
     public DuplicateDetectionListener(InfinityPickaxes plugin) {
+        this(plugin, null);
+    }
+
+    public DuplicateDetectionListener(
+            InfinityPickaxes plugin,
+            BiConsumer<Collection<PhysicalStorageKey>, CompletionStage<DuplicateScanResult>> shadowScan) {
         this.plugin = plugin;
+        this.shadowScan = shadowScan;
         start();
     }
 
@@ -111,7 +123,8 @@ public final class DuplicateDetectionListener implements Listener {
             var retainedStorages = new ArrayList<>(pendingStorages);
             pendingStorages.clear();
             pendingScan = null;
-            plugin.getDuplicateService().scanOnlineAsync(scanActor, retainedStorages);
+            var legacyResult = plugin.getDuplicateService().scanOnlineAsync(scanActor, retainedStorages);
+            if (shadowScan != null) shadowScan.accept(retainedStorages, legacyResult);
         }, delay);
     }
 
