@@ -28,7 +28,13 @@ public final class MariaMiningXpLedger {
     public record Reconciliation(UUID pickaxeId, String status, String detail, String location,
                                  java.time.Instant firstSeen, java.time.Instant updatedAt) { }
     private final DataSource source;
-    public MariaMiningXpLedger(DataSource source) { this.source = Objects.requireNonNull(source); }
+    private final MariaMiningArchiveDelivery archiveDelivery;
+    public MariaMiningXpLedger(DataSource source) { this(source, null); }
+    /** Optional receipt-transaction participant, installed only after the Archive schema is approved. */
+    public MariaMiningXpLedger(DataSource source, MariaMiningArchiveDelivery archiveDelivery) {
+        this.source = Objects.requireNonNull(source);
+        this.archiveDelivery = archiveDelivery;
+    }
 
     public void migrate() throws SQLException {
         new MariaMiningJournal(source).migrate();
@@ -286,6 +292,7 @@ public final class MariaMiningXpLedger {
                 }
                 if (!MariaMiningJournal.finishAttempt(c, credit.creditId(), MariaMiningJournal.AttemptState.COMMITTED, "XP_RECEIPT_COMMITTED"))
                     throw new IllegalStateException("Attempt was voided before commit");
+                if (archiveDelivery != null) archiveDelivery.enroll(c, credit);
                 c.commit(); return new Receipt(credit, plan, new Account(plan.pickaxeId(), plan.profileId(), nextRevision, after));
             } catch (SQLException | RuntimeException failure) {
                 try { c.rollback(); } catch (SQLException rollback) { failure.addSuppressed(rollback); }

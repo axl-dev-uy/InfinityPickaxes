@@ -1,5 +1,27 @@
 # Archives prerequisite contract, version 1
 
+## Archive mining credit delivery v1 (2026-09-24)
+
+This is the current mining-delivery checkpoint; older dated sections below
+describe the sequence of earlier implementations and are not current-status
+claims. InfinityGear now implements the public `archives-api-v1`
+`MiningCreditDeliveryService` with asynchronous activation and callback
+acceptance, a receipt-transaction enrollment hook, a separate durable Archive
+acknowledgment, and stable post-commit delivery sequencing. Only completed
+credits with atomic XP receipts enter this subscription. The legacy mining
+inbox and `CreditedBlockEvent` do not acknowledge Archive delivery.
+
+Migration 14 adds only the Archive subscription, delivery, and order tables.
+It was applied and tested on the disposable MariaDB fixture only. Runtime
+bootstrap checks for the schema and never applies migration 14 automatically.
+`mining-delivery.archive-contract-enabled` remains false by default, and
+Archive must explicitly call `activate()` after registering a consumer.
+There is no legacy backfill. The locally built API artifact has not been
+published, no NoxwardArchive reward consumer was implemented, and no production
+database, merge, or deployment was changed. See the
+[contract](archive-credit-delivery-contract.md) and
+[live fixture acceptance](archive-credit-delivery-live-acceptance.md).
+
 ## Task #7 single-server acceptance checkpoint (2026-09-12)
 
 This section supersedes current-status claims in older dated checkpoints below;
@@ -26,9 +48,9 @@ import/freeze and capability enablement each remain separate Axel/Officer_Ray
 decisions. `book-application` defaults false and aggregate `book-lifecycle`
 remains false.
 
-The current InfinityGear head is `d68d7de`, a documentation-only descendant of
-the pinned acceptance implementation; it is not a replacement acceptance
-artifact.
+At this historical checkpoint, InfinityGear head was `d68d7de`, a
+documentation-only descendant of the pinned acceptance implementation; it was
+not a replacement acceptance artifact.
 
 ## Task #6 physical application checkpoint (2026-09-10)
 
